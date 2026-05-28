@@ -1,0 +1,8 @@
+{
+  "name": "NP-douce",
+  "short_name": "NP-douce",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#090d12",
+  "theme_color": "#2dd4bf"
+}
