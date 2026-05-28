@@ -889,7 +889,8 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
     };
     if (!bestFinal ||
         (candidate.hamiltonianFound && !bestFinal.hamiltonianFound) ||
-        (candidate.hamiltonianFound === bestFinal.hamiltonianFound && candidate.totalTourCost < bestFinal.totalTourCost)) {
+        (candidate.hamiltonianFound === bestFinal.hamiltonianFound &&
+         candidate.totalTourCost < bestFinal.totalTourCost)) {
       bestFinal = candidate;
     }
     if (candidate.hamiltonianFound) break;
@@ -910,12 +911,13 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
     append(lines, bestFinal.lines.join("\n"));
     return {
       lines,
-      totalTourCost: bestFinal.totalTourCost,
+      totalTourCost: bestFinal.rejected ? NaN : bestFinal.totalTourCost,
+      partialTourCost: bestFinal.totalTourCost,
       hamiltonianFound: bestFinal.hamiltonianFound
     };
   }
   append(lines, "No branch was completed.");
-  return { lines, totalTourCost: NaN, hamiltonianFound: false };
+  return { lines, totalTourCost: NaN, partialTourCost: NaN, hamiltonianFound: false };
 }
 
 function applyDegreeTwoForcedEdges(edge, n, endpointLink, state) {
@@ -932,9 +934,7 @@ function applyDegreeTwoForcedEdges(edge, n, endpointLink, state) {
 
     let appliedForVertex = false;
     for (const neighbor of neighbors) {
-      const a = Math.min(vertex, neighbor);
-      const b = Math.max(vertex, neighbor);
-      const key = `${a}:${b}`;
+      const key = edgeKey(vertex, neighbor);
       if (tried.has(key)) continue;
       tried.add(key);
       if (applyChosenEdge(vertex, neighbor, edge, endpointLink, state)) {
@@ -945,11 +945,20 @@ function applyDegreeTwoForcedEdges(edge, n, endpointLink, state) {
     if (appliedForVertex) forcedVertexCount += 1;
   }
 
-  return { forcedVertexCount, forcedEdgeCount, forcedEdgeTotal: state.chosenEdgeTotal };
+  return {
+    forcedVertexCount,
+    forcedEdgeCount,
+    forcedEdgeTotal: state.chosenEdgeTotal
+  };
 }
 
 function propagateDegreeTwoForcedEdges(edge, n, endpointLink, state) {
-  const total = { forcedVertexCount: 0, forcedEdgeCount: 0, forcedEdgeTotal: state.chosenEdgeTotal, passes: 0 };
+  const total = {
+    forcedVertexCount: 0,
+    forcedEdgeCount: 0,
+    forcedEdgeTotal: state.chosenEdgeTotal,
+    passes: 0
+  };
   while (true) {
     const beforeUsed = state.usedVertices;
     const beforeTotal = state.chosenEdgeTotal;
@@ -1008,10 +1017,18 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
       alternativesPerSplit: 2
     });
     search.lines.forEach(line => append(lines, line));
-    append(lines, `Total tour cost = ${formatNumber(search.totalTourCost)}`);
+    if (Number.isFinite(search.totalTourCost)) {
+      append(lines, `Total tour cost = ${formatNumber(search.totalTourCost)}`);
+    } else {
+      append(lines, "Total tour cost = no completed tour");
+      if (Number.isFinite(search.partialTourCost)) {
+        append(lines, `Best partial tour cost = ${formatNumber(search.partialTourCost)}`);
+      }
+    }
     return {
       text: lines.join("\n"),
       totalTourCost: search.totalTourCost,
+      partialTourCost: search.partialTourCost,
       hamiltonianFound: search.hamiltonianFound,
       moments
     };
@@ -1132,7 +1149,14 @@ function runCompressedHcDecision(graph, sourceLabel) {
   append(lines, `HC adaptive beta = ${getHcAdaptiveBeta() ? "on" : "off"}`);
   append(lines, `HC backtrack tries = ${getHcBacktrackTries()}`);
   append(lines, `starting HC beta value = ${formatNumber(beta)}`);
-  append(lines, `HC tour cost = ${formatNumber(result.totalTourCost)}`);
+  if (Number.isFinite(result.totalTourCost)) {
+    append(lines, `HC tour cost = ${formatNumber(result.totalTourCost)}`);
+  } else {
+    append(lines, "HC tour cost = no completed tour");
+    if (Number.isFinite(result.partialTourCost)) {
+      append(lines, `HC best partial tour cost = ${formatNumber(result.partialTourCost)}`);
+    }
+  }
   append(lines, `HC target cost = ${formatNumber(-graph.n)}`);
   append(lines, result.hamiltonianFound ? "HC decision: HAMILTONIAN CYCLE FOUND" : "HC decision: HAMILTONIAN CYCLE NOT FOUND");
   append(lines);

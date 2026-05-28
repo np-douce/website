@@ -44,6 +44,8 @@ Compressed reductions now run the HC solver over the full set of real allowed HC
 
 Candidate edges are normalized with the state function omega. For each valid edge, the app uses the count term `N(e) = 2^(CE - 1) * (n - 1 - VCE + CE)!`, computes `L(e) = ln(N(e)) - beta * mean + 0.5 * beta^2 * variance`, shifts by `M = max L`, then uses `P(e) = exp(L(e) - M) / omega` with `omega = sum exp(L(f) - M)`.
 
+Before scoring, the HC solver runs the original degree-2 forced-edge precheck: if a vertex has exactly two listed HC edges, both are forced into the tour before the scoring loop continues. The stronger dynamic pruning experiment was removed because it was slower and rejected useful branches on the reduction tabs.
+
 `HC repair passes` runs local repair after the math-selected tour. The repair keeps the original HC math as the first pass, fills unfinished reduction tours with neutral zero placeholders, then accepts only 2-opt or targeted 3-opt swaps that lower the final tour cost toward the Hamiltonian target.
 
 ## 3-SAT input format
