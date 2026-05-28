@@ -387,26 +387,65 @@ function collectCandidateEdges(n, edge, endpointLink, state, candidateEdgeKeys =
   return candidateEdges;
 }
 
-function rankScoringEdges(n, edge, edgeSquared, endpointLink, state, beta, candidateEdgeKeys = null) {
+function candidateClassInfo(endpointLink, from, to) {
+  const fromFree = endpointLink[from] === 0;
+  const toFree = endpointLink[to] === 0;
+  if (fromFree && toFree) return { name: "independent/free-free", weight: 2.0 };
+  if (fromFree || toFree) return { name: "neighbor/active-free", weight: 1.0 };
+  return { name: "chain-end/active-active", weight: 0.5 };
+}
+
+function rankScoringEdges(n, edge, edgeSquared, endpointLink, state, beta, candidateEdgeKeys = null, options = {}) {
   const ranked = [];
   const candidateEdges = collectCandidateEdges(n, edge, endpointLink, state, candidateEdgeKeys);
   for (const candidate of candidateEdges) {
     const trialLinks = endpointLink.slice();
     const trialState = { ...state, chosenEdges: null };
     if (!applyChosenEdge(candidate.from, candidate.to, edge, trialLinks, trialState)) continue;
-    const trialScore = computeTheoryScore(n, edge, edgeSquared, trialLinks, trialState, beta);
-    if (!Number.isFinite(trialScore)) continue;
-    ranked.push({ score: trialScore, from: candidate.from, to: candidate.to });
+    const classInfo = candidateClassInfo(endpointLink, candidate.from, candidate.to);
+    const logScore = computeTheoryScore(n, edge, edgeSquared, trialLinks, trialState, beta);
+    if (!Number.isFinite(logScore)) continue;
+    ranked.push({
+      logScore,
+      from: candidate.from,
+      to: candidate.to,
+      className: classInfo.name,
+      classWeight: classInfo.weight
+    });
   }
-  ranked.sort((a, b) => b.score - a.score);
+  if (ranked.length === 0) return ranked;
+
+  const maxLogScore = Math.max(...ranked.map(candidate => candidate.logScore));
+  let omega = 0;
+  for (const candidate of ranked) {
+    candidate.omegaWeight = Math.exp(candidate.logScore - maxLogScore);
+    omega += candidate.omegaWeight;
+  }
+  const logOmega = maxLogScore + Math.log(omega);
+  for (const candidate of ranked) {
+    candidate.probability = candidate.omegaWeight / omega;
+    candidate.score = candidate.probability;
+    candidate.omega = omega;
+    candidate.logOmega = logOmega;
+    candidate.maxLogScore = maxLogScore;
+  }
+
+  ranked.sort((a, b) => b.probability - a.probability);
   return ranked;
 }
 
-function findBestScoringEdge(n, edge, edgeSquared, endpointLink, state, beta, candidateEdgeKeys = null) {
-  const ranked = rankScoringEdges(n, edge, edgeSquared, endpointLink, state, beta, candidateEdgeKeys);
+function formatCandidateChoice(candidate) {
+  const classText = candidate.className
+    ? ` class ${candidate.className}`
+    : "";
+  return `probability ${formatNumber(candidate.probability)} log-score ${formatNumber(candidate.logScore)}${classText}`;
+}
+
+function findBestScoringEdge(n, edge, edgeSquared, endpointLink, state, beta, candidateEdgeKeys = null, options = {}) {
+  const ranked = rankScoringEdges(n, edge, edgeSquared, endpointLink, state, beta, candidateEdgeKeys, options);
   const best = ranked[0];
   if (best) return best;
-  return { score: -Infinity, from: 0, to: 0 };
+  return { score: 0, probability: 0, logScore: -Infinity, from: 0, to: 0 };
 }
 
 function findForcedFinalEdge(n, endpointLink, edge) {
@@ -723,7 +762,7 @@ function finishTourFromState(edge, n, endpointLink, state, options) {
   const forced = findForcedFinalEdge(n, endpointLink, edge);
   let totalTourCost = state.chosenEdgeTotal;
   if (forced.exists) {
-    append(lines, `The biggetst probability is 100% at Edge[${forced.from}][${forced.to}].`);
+    append(lines, `The biggest probability is 1 at Edge[${forced.from}][${forced.to}].`);
     totalTourCost += forced.weight;
     state.chosenEdges.push({ from: forced.from, to: forced.to, weight: forced.weight });
   }
@@ -787,7 +826,7 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
         appendTraceLine(branch.trace, `current standard deviation = ${formatNumber(betaInfo.standardDeviation)} adaptive beta = ${formatNumber(betaInfo.beta)}`);
       }
 
-      const ranked = rankScoringEdges(n, edge, edgeSquared, branch.endpointLink, branch.state, betaInfo.beta);
+      const ranked = rankScoringEdges(n, edge, edgeSquared, branch.endpointLink, branch.state, betaInfo.beta, null, searchOptions);
       if (ranked.length === 0) {
         stoppedBecause = "no scored candidate edges";
         break;
@@ -801,12 +840,12 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
         const altState = cloneSolverState(branch.state);
         if (!applyChosenEdge(alternative.from, alternative.to, edge, altEndpointLink, altState)) continue;
         if (searchOptions.forceDegreeTwo) propagateDegreeTwoForcedEdges(edge, n, altEndpointLink, altState);
-        const regret = Math.max(0, best.score - alternative.score);
+        const regret = Math.max(0, best.logScore - alternative.logScore);
         const altTrace = {
           lines: branch.trace.lines.slice(),
           omitted: branch.trace.omitted
         };
-        appendTraceLine(altTrace, `backtrack choice: Edge[${alternative.from}][${alternative.to}] score ${formatNumber(alternative.score)} regret ${formatNumber(regret)}`);
+        appendTraceLine(altTrace, `backtrack choice: Edge[${alternative.from}][${alternative.to}] ${formatCandidateChoice(alternative)} regret ${formatNumber(regret)}`);
         queue.push({
           endpointLink: altEndpointLink,
           state: altState,
@@ -822,7 +861,7 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
         }
       }
 
-      appendTraceLine(branch.trace, `chosen edge: Edge[${best.from}][${best.to}] score ${formatNumber(best.score)}`);
+      appendTraceLine(branch.trace, `chosen edge: Edge[${best.from}][${best.to}] ${formatCandidateChoice(best)} omega ${formatNumber(best.omega)} log-omega ${formatNumber(best.logOmega)}`);
       if (!applyChosenEdge(best.from, best.to, edge, branch.endpointLink, branch.state)) {
         stoppedBecause = "chosen edge became invalid";
         break;
@@ -988,9 +1027,11 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
       stepBeta = lastAdaptiveBeta;
       append(lines, `current standard deviation = ${formatNumber(current.stats.standardDeviation)} adaptive beta = ${formatNumber(stepBeta)}`);
     }
-    const best = findBestScoringEdge(n, edge, edgeSquared, endpointLink, state, stepBeta);
+    const best = findBestScoringEdge(n, edge, edgeSquared, endpointLink, state, stepBeta, null, options);
     if (!best.from) break;
-    append(lines, `The biggetst probability is ${formatNumber(best.score)} at Edge[${best.from}][${best.to}].`);
+    append(lines, `The biggest probability is ${formatNumber(best.probability)} at Edge[${best.from}][${best.to}].`);
+    append(lines, `Taylor log-score = ${formatNumber(best.logScore)} normalized by omega = ${formatNumber(best.omega)} and log-omega = ${formatNumber(best.logOmega)}.`);
+    if (best.className) append(lines, `Edge class = ${best.className}.`);
     if (!applyChosenEdge(best.from, best.to, edge, endpointLink, state)) break;
     if (options.forceDegreeTwo) {
       const forcedAfterChoice = propagateDegreeTwoForcedEdges(edge, n, endpointLink, state);
