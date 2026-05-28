@@ -42,6 +42,8 @@ Compressed reductions now run the HC solver over the full set of real allowed HC
 
 `HC backtrack tries` lets the HC solver revisit close decisions. The score formula ranks every valid edge, the greedy edge is tried first, and alternate branches are kept when their score is close to the best edge. Higher values can improve accuracy but may run much slower.
 
+Candidate edges are normalized with the state function omega. For each valid edge, the app uses the count term `N(e) = 2^(CE - 1) * (n - 1 - VCE + CE)!`, computes `L(e) = ln(N(e)) - beta * mean + 0.5 * beta^2 * variance`, shifts by `M = max L`, then uses `P(e) = exp(L(e) - M) / omega` with `omega = sum exp(L(f) - M)`.
+
 `HC repair passes` runs local repair after the math-selected tour. The repair keeps the original HC math as the first pass, fills unfinished reduction tours with neutral zero placeholders, then accepts only 2-opt or targeted 3-opt swaps that lower the final tour cost toward the Hamiltonian target.
 
 ## 3-SAT input format
