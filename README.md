@@ -40,6 +40,8 @@ Before the compressed HC graph is built, reduction tabs run an exact unit-clause
 
 `HC beta multiplier` controls the beta temperature used by the reduction solver. The app computes its suggested beta from the graph variance, then multiplies it by this value, so `0.25` means one-quarter of the suggested beta.
 
+`HC score method` can use the importance score `lnZ(CE + e) - lnZ(CE without e)` or the older omega score `lnZ(CE + e)`. The importance score is selected by default so it can be tested directly against the raw edge score.
+
 `adaptive beta` changes beta during the HC solve. When it is on, each choice step recomputes the current conditioned standard deviation and uses `beta multiplier / current standard deviation`.
 
 `HC backtrack tries` lets the HC solver revisit close decisions. The score formula ranks every valid edge, the greedy edge is tried first, and alternate branches are kept only when their log-score is tied with the best edge up to numerical tolerance. Each choice keeps at most two smart alternatives, and the total branch limit is capped by a polynomial edge-count guard. The app defaults this to `25` because small reduction gadgets often need a few tie branches; higher values can improve accuracy but may run much slower.

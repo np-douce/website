@@ -339,9 +339,58 @@ function adaptiveBetaForState(n, edge, edgeSquared, endpointLink, state, multipl
   return { beta, stats };
 }
 
+function computeLogZFromStats(stats, beta) {
+  return stats.entropy - (beta * stats.mean) + ((beta * beta) * 0.5 * stats.variance);
+}
+
 function computeTheoryScore(n, edge, edgeSquared, endpointLink, state, beta) {
   const stats = computeConditionedStateStats(n, edge, edgeSquared, endpointLink, state);
-  return stats.entropy - (beta * stats.mean) + ((beta * beta) * 0.5 * stats.variance);
+  return computeLogZFromStats(stats, beta);
+}
+
+function computeImportanceScore(currentStats, plusStats, beta) {
+  const plusLogZ = computeLogZFromStats(plusStats, beta);
+  const logOmegaRatio = plusStats.entropy - currentStats.entropy;
+  if (!Number.isFinite(logOmegaRatio)) return null;
+
+  if (logOmegaRatio >= -1e-12) {
+    return {
+      importance: Infinity,
+      plusLogZ,
+      minusLogZ: -Infinity,
+      omegaRatio: 1,
+      minusMean: NaN,
+      minusVariance: NaN
+    };
+  }
+
+  const omegaRatio = Math.exp(logOmegaRatio);
+  const minusWeight = -Math.expm1(logOmegaRatio);
+  if (!(minusWeight > 0) || !Number.isFinite(minusWeight)) return null;
+
+  const currentSecondMoment = currentStats.variance + (currentStats.mean * currentStats.mean);
+  const plusSecondMoment = plusStats.variance + (plusStats.mean * plusStats.mean);
+  const minusMean = (currentStats.mean - (omegaRatio * plusStats.mean)) / minusWeight;
+  const minusSecondMoment = (currentSecondMoment - (omegaRatio * plusSecondMoment)) / minusWeight;
+  let minusVariance = minusSecondMoment - (minusMean * minusMean);
+  if (minusVariance < 0 && minusVariance > -1e-9) minusVariance = 0;
+  if (!Number.isFinite(minusMean) || !Number.isFinite(minusVariance)) return null;
+  minusVariance = Math.max(0, minusVariance);
+
+  const minusStats = {
+    entropy: currentStats.entropy + Math.log(minusWeight),
+    mean: minusMean,
+    variance: minusVariance
+  };
+  const minusLogZ = computeLogZFromStats(minusStats, beta);
+  return {
+    importance: plusLogZ - minusLogZ,
+    plusLogZ,
+    minusLogZ,
+    omegaRatio,
+    minusMean,
+    minusVariance
+  };
 }
 
 function edgeKey(from, to) {
@@ -397,16 +446,33 @@ function candidateClassInfo(endpointLink, from, to) {
 
 function rankScoringEdges(n, edge, edgeSquared, endpointLink, state, beta, candidateEdgeKeys = null, options = {}) {
   const ranked = [];
+  const scoreMethod = options.scoreMethod === "importance" ? "importance" : "omega";
+  const currentStats = scoreMethod === "importance"
+    ? computeConditionedStateStats(n, edge, edgeSquared, endpointLink, state)
+    : null;
   const candidateEdges = collectCandidateEdges(n, edge, endpointLink, state, candidateEdgeKeys);
   for (const candidate of candidateEdges) {
     const trialLinks = endpointLink.slice();
     const trialState = { ...state, chosenEdges: null };
     if (!applyChosenEdge(candidate.from, candidate.to, edge, trialLinks, trialState)) continue;
     const classInfo = candidateClassInfo(endpointLink, candidate.from, candidate.to);
-    const logScore = computeTheoryScore(n, edge, edgeSquared, trialLinks, trialState, beta);
-    if (!Number.isFinite(logScore)) continue;
+    const plusStats = computeConditionedStateStats(n, edge, edgeSquared, trialLinks, trialState);
+    const plusLogZ = computeLogZFromStats(plusStats, beta);
+    let logScore = plusLogZ;
+    let importanceInfo = null;
+    if (scoreMethod === "importance") {
+      importanceInfo = computeImportanceScore(currentStats, plusStats, beta);
+      if (!importanceInfo) continue;
+      logScore = importanceInfo.importance;
+    }
+    if (Number.isNaN(logScore) || logScore === -Infinity) continue;
     ranked.push({
       logScore,
+      plusLogZ,
+      importance: importanceInfo ? importanceInfo.importance : null,
+      minusLogZ: importanceInfo ? importanceInfo.minusLogZ : null,
+      omegaRatio: importanceInfo ? importanceInfo.omegaRatio : null,
+      scoreMethod,
       from: candidate.from,
       to: candidate.to,
       className: classInfo.name,
@@ -414,6 +480,19 @@ function rankScoringEdges(n, edge, edgeSquared, endpointLink, state, beta, candi
     });
   }
   if (ranked.length === 0) return ranked;
+
+  const infiniteWinners = ranked.filter(candidate => candidate.logScore === Infinity);
+  if (infiniteWinners.length > 0) {
+    for (const candidate of ranked) {
+      candidate.probability = candidate.logScore === Infinity ? 1 / infiniteWinners.length : 0;
+      candidate.score = candidate.probability;
+      candidate.omega = infiniteWinners.length;
+      candidate.logOmega = Infinity;
+      candidate.maxLogScore = Infinity;
+    }
+    ranked.sort((a, b) => b.probability - a.probability);
+    return ranked;
+  }
 
   const maxLogScore = Math.max(...ranked.map(candidate => candidate.logScore));
   let omega = 0;
@@ -438,7 +517,10 @@ function formatCandidateChoice(candidate) {
   const classText = candidate.className
     ? ` class ${candidate.className}`
     : "";
-  return `probability ${formatNumber(candidate.probability)} log-score ${formatNumber(candidate.logScore)}${classText}`;
+  const scoreText = candidate.scoreMethod === "importance"
+    ? `importance ${formatNumber(candidate.importance)} plus-lnZ ${formatNumber(candidate.plusLogZ)} minus-lnZ ${formatNumber(candidate.minusLogZ)}`
+    : `log-score ${formatNumber(candidate.logScore)}`;
+  return `probability ${formatNumber(candidate.probability)} ${scoreText}${classText}`;
 }
 
 function findBestScoringEdge(n, edge, edgeSquared, endpointLink, state, beta, candidateEdgeKeys = null, options = {}) {
@@ -797,6 +879,14 @@ function appendTraceLine(trace, line) {
   else trace.omitted += 1;
 }
 
+function scoreRegret(best, candidate) {
+  if (best.logScore === Infinity && candidate.logScore === Infinity) return 0;
+  if (best.logScore === Infinity) return Infinity;
+  const regret = best.logScore - candidate.logScore;
+  if (!Number.isFinite(regret)) return 0;
+  return Math.max(0, regret);
+}
+
 function countPotentialSearchEdges(edge, n, state) {
   if (state.allowedEdgeKeys) return state.allowedEdgeKeys.size;
   let count = 0;
@@ -821,7 +911,7 @@ function selectSmartBacktrackAlternatives(ranked, maxAlternatives, options = {})
 
   for (let optionIndex = 1; optionIndex < ranked.length && alternatives.length < maxAlternatives; optionIndex++) {
     const candidate = ranked[optionIndex];
-    const regret = Math.max(0, best.logScore - candidate.logScore);
+    const regret = scoreRegret(best, candidate);
     const probabilityGap = Math.abs(best.probability - candidate.probability);
     if (regret <= tolerance || probabilityGap <= probabilityTolerance) {
       alternatives.push({ candidate, optionIndex, regret });
@@ -1020,6 +1110,7 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
   const effectiveBeta = Number.isFinite(beta) ? beta : (1.0 / Math.sqrt(Math.max(Number.MIN_VALUE, moments.tourVariance)));
   const adaptiveBeta = Boolean(options.adaptiveBeta);
   const betaMultiplier = Number.isFinite(options.betaMultiplier) ? options.betaMultiplier : effectiveBeta;
+  const scoreMethod = options.scoreMethod === "importance" ? "importance" : "omega";
   append(lines, `Source: ${sourceLabel}`);
   append(lines, `n = ${n}`);
   append(lines, `the average  = ${formatNumber(moments.meanTourLength)}`);
@@ -1027,6 +1118,7 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
   append(lines, `the standard deviation = ${formatNumber(moments.tourVariance)} ${formatNumber(Math.sqrt(Math.max(0, moments.tourVariance)))}`);
   append(lines, `suggested beta value = ${formatNumber(1.0 / Math.sqrt(Math.max(Number.MIN_VALUE, moments.tourVariance)))}`);
   append(lines, `adaptive beta = ${adaptiveBeta ? "on" : "off"}`);
+  append(lines, `score method = ${scoreMethod === "importance" ? "importance lnZ(force edge) - lnZ(forbid edge)" : "omega lnZ(force edge)"}`);
   const entropy = lnGamma(n) - Math.log(2.0);
   const partition = entropy - (effectiveBeta * moments.meanTourLength) + ((effectiveBeta * effectiveBeta) * 0.5 * moments.tourVariance);
   append(lines, `entropy ${formatNumber(entropy)} partition ${formatNumber(partition)}`);
@@ -1087,7 +1179,11 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
     const best = findBestScoringEdge(n, edge, edgeSquared, endpointLink, state, stepBeta, null, options);
     if (!best.from) break;
     append(lines, `The biggest probability is ${formatNumber(best.probability)} at Edge[${best.from}][${best.to}].`);
-    append(lines, `Taylor log-score = ${formatNumber(best.logScore)} normalized by omega = ${formatNumber(best.omega)} and log-omega = ${formatNumber(best.logOmega)}.`);
+    if (best.scoreMethod === "importance") {
+      append(lines, `Importance score = ${formatNumber(best.importance)} from plus lnZ ${formatNumber(best.plusLogZ)} minus lnZ ${formatNumber(best.minusLogZ)}; normalized by omega = ${formatNumber(best.omega)} and log-omega = ${formatNumber(best.logOmega)}.`);
+    } else {
+      append(lines, `Taylor log-score = ${formatNumber(best.logScore)} normalized by omega = ${formatNumber(best.omega)} and log-omega = ${formatNumber(best.logOmega)}.`);
+    }
     if (best.className) append(lines, `Edge class = ${best.className}.`);
     if (!applyChosenEdge(best.from, best.to, edge, endpointLink, state)) break;
     if (options.forceDegreeTwo) {
@@ -1138,6 +1234,12 @@ function getHcBetaMultiplier() {
   return value;
 }
 
+function getHcScoreMethod() {
+  const input = document.getElementById("hcScoreMethod");
+  if (!input) return "importance";
+  return input.value === "omega" ? "omega" : "importance";
+}
+
 function getHcAdaptiveBeta() {
   const input = document.getElementById("hcAdaptiveBeta");
   return input ? input.checked : false;
@@ -1180,12 +1282,14 @@ function runCompressedHcDecision(graph, sourceLabel) {
     backtrackLimit: getHcBacktrackTries(),
     completeWithNeutralEdges: true,
     adaptiveBeta: getHcAdaptiveBeta(),
-    betaMultiplier: multiplier
+    betaMultiplier: multiplier,
+    scoreMethod: getHcScoreMethod()
   });
   const lines = [];
   append(lines, "NP-douce HC solver result:");
   if (graph.allowedEdgeKeys) append(lines, `allowed HC edges scored = ${graph.allowedEdgeKeys.size}`);
   append(lines, `HC beta multiplier = x${formatNumber(multiplier)}`);
+  append(lines, `HC score method = ${getHcScoreMethod()}`);
   append(lines, `HC adaptive beta = ${getHcAdaptiveBeta() ? "on" : "off"}`);
   append(lines, `HC backtrack tries = ${getHcBacktrackTries()}`);
   append(lines, `starting HC beta value = ${formatNumber(beta)}`);
@@ -3642,14 +3746,16 @@ document.getElementById("runPairs").addEventListener("click", () => runSafely(()
     forceDegreeTwo: true,
     completeWithNeutralEdges: true,
     repairPasses: getHcRepairPasses(),
-    backtrackLimit: getHcBacktrackTries()
+    backtrackLimit: getHcBacktrackTries(),
+    scoreMethod: getHcScoreMethod()
   });
 }));
 document.getElementById("runMatrix").addEventListener("click", () => runSafely(() => {
   const { edge, n } = parseMatrix(document.getElementById("matrixInput").value);
   return runTrackingSolver(edge, n, Number(document.getElementById("matrixBeta").value), "browser matrix input", {
     repairPasses: getHcRepairPasses(),
-    backtrackLimit: getHcBacktrackTries()
+    backtrackLimit: getHcBacktrackTries(),
+    scoreMethod: getHcScoreMethod()
   });
 }));
 document.getElementById("runPoints").addEventListener("click", () => runSafely(() => {
@@ -3657,14 +3763,16 @@ document.getElementById("runPoints").addEventListener("click", () => runSafely((
   return runTrackingSolver(edge, n, Number(document.getElementById("pointsBeta").value), "browser points input", {
     scoreZeroEdges: true,
     repairPasses: getHcRepairPasses(),
-    backtrackLimit: getHcBacktrackTries()
+    backtrackLimit: getHcBacktrackTries(),
+    scoreMethod: getHcScoreMethod()
   });
 }));
 document.getElementById("runManual").addEventListener("click", () => runSafely(() => {
   const { edge, n } = parseManual(document.getElementById("manualInput").value);
   return runTrackingSolver(edge, n, Number(document.getElementById("manualBeta").value), "browser manual input", {
     repairPasses: getHcRepairPasses(),
-    backtrackLimit: getHcBacktrackTries()
+    backtrackLimit: getHcBacktrackTries(),
+    scoreMethod: getHcScoreMethod()
   });
 }));
 
