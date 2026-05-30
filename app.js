@@ -797,9 +797,45 @@ function appendTraceLine(trace, line) {
   else trace.omitted += 1;
 }
 
+function countPotentialSearchEdges(edge, n, state) {
+  if (state.allowedEdgeKeys) return state.allowedEdgeKeys.size;
+  let count = 0;
+  for (let i = 1; i <= n - 1; i++) {
+    for (let j = i + 1; j <= n; j++) {
+      if (state.scoreZeroEdges || edge[i][j] !== 0) count++;
+    }
+  }
+  return count;
+}
+
+function selectSmartBacktrackAlternatives(ranked, maxAlternatives, options = {}) {
+  if (ranked.length <= 1 || maxAlternatives <= 0) return [];
+  const tolerance = Number.isFinite(options.smartBacktrackLogTolerance)
+    ? Math.max(0, options.smartBacktrackLogTolerance)
+    : 1e-9;
+  const probabilityTolerance = Number.isFinite(options.smartBacktrackProbabilityTolerance)
+    ? Math.max(0, options.smartBacktrackProbabilityTolerance)
+    : 1e-12;
+  const best = ranked[0];
+  const alternatives = [];
+
+  for (let optionIndex = 1; optionIndex < ranked.length && alternatives.length < maxAlternatives; optionIndex++) {
+    const candidate = ranked[optionIndex];
+    const regret = Math.max(0, best.logScore - candidate.logScore);
+    const probabilityGap = Math.abs(best.probability - candidate.probability);
+    if (regret <= tolerance || probabilityGap <= probabilityTolerance) {
+      alternatives.push({ candidate, optionIndex, regret });
+    }
+  }
+  return alternatives;
+}
+
 function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, rootState, searchOptions) {
-  const maxTries = Math.max(1, Math.floor(searchOptions.backtrackLimit));
+  const requestedTries = Math.max(1, Math.floor(searchOptions.backtrackLimit));
   const alternativesPerSplit = Math.max(1, Math.floor(searchOptions.alternativesPerSplit || 2));
+  const initialEdgeCount = countPotentialSearchEdges(edge, n, rootState);
+  const polynomialBranchCap = Math.max(1, Math.min(Number.MAX_SAFE_INTEGER, initialEdgeCount * initialEdgeCount));
+  const maxTries = Math.min(requestedTries, polynomialBranchCap);
   const queue = [{
     endpointLink: rootEndpointLink.slice(),
     state: cloneSolverState(rootState),
@@ -833,14 +869,14 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
       }
 
       const best = ranked[0];
-      const alternativeLimit = Math.min(alternativesPerSplit, ranked.length - 1);
-      for (let optionIndex = 1; optionIndex <= alternativeLimit; optionIndex++) {
-        const alternative = ranked[optionIndex];
+      const alternatives = selectSmartBacktrackAlternatives(ranked, alternativesPerSplit, searchOptions);
+      for (const alternativeInfo of alternatives) {
+        const alternative = alternativeInfo.candidate;
         const altEndpointLink = branch.endpointLink.slice();
         const altState = cloneSolverState(branch.state);
         if (!applyChosenEdge(alternative.from, alternative.to, edge, altEndpointLink, altState)) continue;
         if (searchOptions.forceDegreeTwo) propagateDegreeTwoForcedEdges(edge, n, altEndpointLink, altState);
-        const regret = Math.max(0, best.logScore - alternative.logScore);
+        const regret = alternativeInfo.regret;
         const altTrace = {
           lines: branch.trace.lines.slice(),
           omitted: branch.trace.omitted
@@ -849,7 +885,7 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
         queue.push({
           endpointLink: altEndpointLink,
           state: altState,
-          penalty: branch.penalty + regret + (optionIndex * 1e-9),
+          penalty: branch.penalty + regret + (alternativeInfo.optionIndex * 1e-9),
           lastAdaptiveBeta: betaInfo.lastAdaptiveBeta,
           trace: altTrace,
           label: `regret ${formatNumber(branch.penalty + regret)}`
@@ -899,9 +935,12 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
   const lines = [];
   append(lines, "Score-guided backtracking:");
   append(lines, `backtrack try limit = ${maxTries}`);
+  append(lines, `requested backtrack tries = ${requestedTries}`);
+  append(lines, `polynomial branch cap = ${polynomialBranchCap}`);
   append(lines, `branches explored = ${explored}`);
   append(lines, `branches queued = ${queued}`);
-  append(lines, `alternatives per split = ${alternativesPerSplit}`);
+  append(lines, `smart alternatives per split cap = ${alternativesPerSplit}`);
+  append(lines, `smart backtrack log tolerance = ${formatNumber(searchOptions.smartBacktrackLogTolerance ?? 1e-9)}`);
   append(lines, `best branch penalty = ${formatNumber(bestFinal ? bestFinal.penalty : 0)}`);
   append(lines, `best branch stopped because = ${bestFinal ? bestFinal.stoppedBecause : "none"}`);
   if (bestFinal) {
@@ -1014,7 +1053,8 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
       adaptiveBeta,
       betaMultiplier,
       backtrackLimit,
-      alternativesPerSplit: 2
+      alternativesPerSplit: 2,
+      smartBacktrackLogTolerance: 1e-9
     });
     search.lines.forEach(line => append(lines, line));
     if (Number.isFinite(search.totalTourCost)) {
@@ -2324,8 +2364,7 @@ function summarizeLargeSudokuReduction(puzzle) {
 function runVertexCover(text) {
   const { n, k, padding, edges } = parseVertexCover(text);
   const sat = vertexCoverTo3Sat(n, k, edges);
-  const graph = buildCompressedReductionGraph(sat.variableCount, sat.clauses, padding);
-  const forced = findDegreeTwoForcedEdges(graph.edge, graph.n);
+  const prepared = prepareCompressedSatForHc(sat, padding);
 
   const lines = [];
   append(lines, "Vertex Cover instance:");
@@ -2338,23 +2377,9 @@ function runVertexCover(text) {
   append(lines, "3-SAT encoding:");
   append(lines, `cardinality encoding = ${sat.encoding}`);
   append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `variables including auxiliary = ${sat.variableCount}`);
-  append(lines, `3-SAT clauses = ${sat.clauses.length}`);
-  append(lines);
-  append(lines, "Compressed HC reduction size:");
-  append(lines, `base directed nodes = ${graph.baseDirected}`);
-  append(lines, `total directed nodes = ${graph.directedCount}`);
-  append(lines, `undirected HC nodes = ${graph.n}`);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
-  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
-  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
-  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
-  append(lines);
-  const hc = runCompressedHcDecision(graph, "Vertex Cover compressed HC reduction");
-  append(lines, hc.summary);
-  append(lines);
-  append(lines, inferredAnswerLine(hc, "Vertex Cover"));
+  append(lines, `variables before simplification = ${sat.variableCount}`);
+  append(lines, `3-SAT clauses before simplification = ${sat.clauses.length}`);
+  appendPreparedHcReduction(lines, prepared, "Vertex Cover compressed HC reduction", "Vertex Cover");
   return lines.join("\n");
 }
 
@@ -2363,8 +2388,7 @@ function runClique(text) {
   const complementEdges = buildComplementEdges(n, edges);
   const vertexCoverK = n - k;
   const sat = vertexCoverK >= 0 ? vertexCoverTo3Sat(n, vertexCoverK, complementEdges) : null;
-  const graph = sat ? buildCompressedReductionGraph(sat.variableCount, sat.clauses, padding) : null;
-  const forced = graph ? findDegreeTwoForcedEdges(graph.edge, graph.n) : null;
+  const prepared = sat ? prepareCompressedSatForHc(sat, padding) : null;
 
   const lines = [];
   append(lines, "Clique instance:");
@@ -2379,7 +2403,7 @@ function runClique(text) {
   append(lines, `complement graph edges = ${complementEdges.length}`);
   append(lines, `vertex cover target on complement = ${vertexCoverK}`);
 
-  if (!sat || !graph || !forced) {
+  if (!sat || !prepared) {
     append(lines);
     append(lines, "Clique answer: NO");
     append(lines, `k = ${k} is larger than the vertex count ${n}`);
@@ -2390,23 +2414,9 @@ function runClique(text) {
   append(lines, "3-SAT encoding:");
   append(lines, `cardinality encoding = ${sat.encoding}`);
   append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `variables including auxiliary = ${sat.variableCount}`);
-  append(lines, `3-SAT clauses = ${sat.clauses.length}`);
-  append(lines);
-  append(lines, "Compressed HC reduction size:");
-  append(lines, `base directed nodes = ${graph.baseDirected}`);
-  append(lines, `total directed nodes = ${graph.directedCount}`);
-  append(lines, `undirected HC nodes = ${graph.n}`);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
-  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
-  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
-  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
-  append(lines);
-  const hc = runCompressedHcDecision(graph, "Clique compressed HC reduction");
-  append(lines, hc.summary);
-  append(lines);
-  append(lines, inferredAnswerLine(hc, "Clique"));
+  append(lines, `variables before simplification = ${sat.variableCount}`);
+  append(lines, `3-SAT clauses before simplification = ${sat.clauses.length}`);
+  appendPreparedHcReduction(lines, prepared, "Clique compressed HC reduction", "Clique");
   return lines.join("\n");
 }
 
@@ -2414,8 +2424,7 @@ function runIndependentSet(text) {
   const { n, k, padding, edges } = parseIndependentSet(text);
   const vertexCoverK = n - k;
   const sat = vertexCoverK >= 0 ? vertexCoverTo3Sat(n, vertexCoverK, edges) : null;
-  const graph = sat ? buildCompressedReductionGraph(sat.variableCount, sat.clauses, padding) : null;
-  const forced = graph ? findDegreeTwoForcedEdges(graph.edge, graph.n) : null;
+  const prepared = sat ? prepareCompressedSatForHc(sat, padding) : null;
 
   const lines = [];
   append(lines, "Independent Set instance:");
@@ -2429,7 +2438,7 @@ function runIndependentSet(text) {
   append(lines, "Independent Set(G, k) -> Vertex Cover(G, vertices - k) -> 3-SAT -> compressed Hamiltonian Cycle");
   append(lines, `vertex cover target = ${vertexCoverK}`);
 
-  if (!sat || !graph || !forced) {
+  if (!sat || !prepared) {
     append(lines);
     append(lines, "Independent Set answer: NO");
     append(lines, `k = ${k} is larger than the vertex count ${n}`);
@@ -2440,31 +2449,16 @@ function runIndependentSet(text) {
   append(lines, "3-SAT encoding:");
   append(lines, `cardinality encoding = ${sat.encoding}`);
   append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `variables including auxiliary = ${sat.variableCount}`);
-  append(lines, `3-SAT clauses = ${sat.clauses.length}`);
-  append(lines);
-  append(lines, "Compressed HC reduction size:");
-  append(lines, `base directed nodes = ${graph.baseDirected}`);
-  append(lines, `total directed nodes = ${graph.directedCount}`);
-  append(lines, `undirected HC nodes = ${graph.n}`);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
-  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
-  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
-  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
-  append(lines);
-  const hc = runCompressedHcDecision(graph, "Independent Set compressed HC reduction");
-  append(lines, hc.summary);
-  append(lines);
-  append(lines, inferredAnswerLine(hc, "Independent Set"));
+  append(lines, `variables before simplification = ${sat.variableCount}`);
+  append(lines, `3-SAT clauses before simplification = ${sat.clauses.length}`);
+  appendPreparedHcReduction(lines, prepared, "Independent Set compressed HC reduction", "Independent Set");
   return lines.join("\n");
 }
 
 function runSetCover(text) {
   const { universeSize, setCount, k, padding, sets } = parseSetCover(text);
   const sat = setCoverTo3Sat(universeSize, setCount, k, sets);
-  const graph = buildCompressedReductionGraph(sat.variableCount, sat.clauses, padding);
-  const forced = findDegreeTwoForcedEdges(graph.edge, graph.n);
+  const prepared = prepareCompressedSatForHc(sat, padding);
 
   const lines = [];
   append(lines, "Set Cover instance:");
@@ -2482,31 +2476,16 @@ function runSetCover(text) {
   append(lines, "3-SAT encoding:");
   append(lines, `cardinality encoding = ${sat.encoding}`);
   append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `variables including auxiliary = ${sat.variableCount}`);
-  append(lines, `3-SAT clauses = ${sat.clauses.length}`);
-  append(lines);
-  append(lines, "Compressed HC reduction size:");
-  append(lines, `base directed nodes = ${graph.baseDirected}`);
-  append(lines, `total directed nodes = ${graph.directedCount}`);
-  append(lines, `undirected HC nodes = ${graph.n}`);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
-  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
-  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
-  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
-  append(lines);
-  const hc = runCompressedHcDecision(graph, "Set Cover compressed HC reduction");
-  append(lines, hc.summary);
-  append(lines);
-  append(lines, inferredAnswerLine(hc, "Set Cover"));
+  append(lines, `variables before simplification = ${sat.variableCount}`);
+  append(lines, `3-SAT clauses before simplification = ${sat.clauses.length}`);
+  appendPreparedHcReduction(lines, prepared, "Set Cover compressed HC reduction", "Set Cover");
   return lines.join("\n");
 }
 
 function runX3c(text) {
   const { universeSize, setCount, padding, sets } = parseX3c(text);
   const sat = x3cTo3Sat(universeSize, setCount, sets);
-  const graph = buildCompressedReductionGraph(sat.variableCount, sat.clauses, padding);
-  const forced = findDegreeTwoForcedEdges(graph.edge, graph.n);
+  const prepared = prepareCompressedSatForHc(sat, padding);
   const targetSetCount = universeSize % 3 === 0 ? universeSize / 3 : "not integral";
 
   const lines = [];
@@ -2525,23 +2504,9 @@ function runX3c(text) {
   append(lines, "3-SAT encoding:");
   append(lines, `encoding = ${sat.encoding}`);
   append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `variables including auxiliary = ${sat.variableCount}`);
-  append(lines, `3-SAT clauses = ${sat.clauses.length}`);
-  append(lines);
-  append(lines, "Compressed HC reduction size:");
-  append(lines, `base directed nodes = ${graph.baseDirected}`);
-  append(lines, `total directed nodes = ${graph.directedCount}`);
-  append(lines, `undirected HC nodes = ${graph.n}`);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
-  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
-  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
-  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
-  append(lines);
-  const hc = runCompressedHcDecision(graph, "X3C compressed HC reduction");
-  append(lines, hc.summary);
-  append(lines);
-  append(lines, inferredAnswerLine(hc, "X3C"));
+  append(lines, `variables before simplification = ${sat.variableCount}`);
+  append(lines, `3-SAT clauses before simplification = ${sat.clauses.length}`);
+  appendPreparedHcReduction(lines, prepared, "X3C compressed HC reduction", "X3C");
   return lines.join("\n");
 }
 
@@ -2553,8 +2518,7 @@ function graphColorName(index) {
 function runGraphColoring(text) {
   const { n, declaredEdgeCount, colorCount, padding, edges } = parseGraphColoring(text);
   const sat = graphColoringTo3Sat(n, colorCount, edges);
-  const graph = buildCompressedReductionGraph(sat.variableCount, sat.clauses, padding);
-  const forced = findDegreeTwoForcedEdges(graph.edge, graph.n);
+  const prepared = prepareCompressedSatForHc(sat, padding);
 
   const lines = [];
   append(lines, "Graph Coloring instance:");
@@ -2572,23 +2536,9 @@ function runGraphColoring(text) {
   append(lines, "3-SAT encoding:");
   append(lines, `encoding = ${sat.encoding}`);
   append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `variables = ${sat.variableCount}`);
-  append(lines, `3-SAT clauses = ${sat.clauses.length}`);
-  append(lines);
-  append(lines, "Compressed HC reduction size:");
-  append(lines, `base directed nodes = ${graph.baseDirected}`);
-  append(lines, `total directed nodes = ${graph.directedCount}`);
-  append(lines, `undirected HC nodes = ${graph.n}`);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
-  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
-  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
-  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
-  append(lines);
-  const hc = runCompressedHcDecision(graph, "Graph Coloring compressed HC reduction");
-  append(lines, hc.summary);
-  append(lines);
-  append(lines, inferredAnswerLine(hc, "Graph Coloring"));
+  append(lines, `variables before simplification = ${sat.variableCount}`);
+  append(lines, `3-SAT clauses before simplification = ${sat.clauses.length}`);
+  appendPreparedHcReduction(lines, prepared, "Graph Coloring compressed HC reduction", "Graph Coloring");
   return lines.join("\n");
 }
 
@@ -2596,7 +2546,10 @@ function runSudoku() {
   const puzzle = readSudokuPuzzle();
   const compactMode = puzzle.n <= 16;
   const sat = compactMode ? sudokuTo3Sat(puzzle) : summarizeLargeSudokuReduction(puzzle);
-  const stats = compactMode ? estimateCompressedReductionGraph(sat.variableCount, sat.clauses, 0) : sat.stats;
+  const prepared = compactMode ? prepareCompressedSatForHc(sat, 0) : null;
+  const stats = compactMode && !prepared.simplified.contradiction
+    ? estimateCompressedReductionGraph(prepared.simplified.variableCount, prepared.simplified.clauses, 0)
+    : sat.stats;
   const denseLimit = Math.max(0, Math.floor(readNonnegativeNumber("sudokuHcLimit", "Dense HC calculation node limit")));
   let hc = null;
   let solution = null;
@@ -2613,29 +2566,41 @@ function runSudoku() {
   append(lines, "Exact Sudoku reduction:");
   append(lines, "Sudoku -> exact cover style 3-SAT -> compressed Hamiltonian Cycle");
   append(lines, `base placement variables = ${sat.baseVariableCount}`);
-  append(lines, `SAT variables including auxiliary = ${sat.variableCount}`);
+  append(lines, `SAT variables before simplification = ${sat.variableCount}`);
   append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `3-SAT clauses = ${compactMode ? sat.clauses.length : sat.clauseCount}`);
+  append(lines, `3-SAT clauses before simplification = ${compactMode ? sat.clauses.length : sat.clauseCount}`);
   if (!compactMode) append(lines, "Large Sudoku mode: clauses are counted exactly without materializing the full clause list in memory.");
   append(lines);
-  append(lines, "Compressed HC reduction size:");
-  append(lines, `base directed nodes = ${stats.baseDirected}`);
-  append(lines, `total directed nodes = ${stats.directedCount}`);
-  append(lines, `undirected HC nodes = ${stats.n}`);
-  append(lines, `directed arcs = ${stats.arcCount}`);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
   if (compactMode) {
-    append(lines, `vertices with exactly two HC edges = ${stats.forcedVertexCount}`);
-    append(lines, `forced HC edges = ${stats.forcedEdgeCount}`);
-    append(lines, `forced edge total = ${formatNumber(stats.forcedEdgeTotal)}`);
+    appendSatSimplificationSummary(lines, prepared.simplified);
   } else {
-    append(lines, "not materialized for 25x25 mode, because building every HC edge would be too much memory for a browser or phone");
+    append(lines, "Exact unit-clause simplification before HC:");
+    append(lines, "not materialized for 25x25 mode, because building the full clause list would be too much memory for a browser or phone");
   }
   append(lines);
-  if (compactMode && stats.n <= denseLimit) {
-    const graph = buildCompressedReductionGraph(sat.variableCount, sat.clauses, 0);
-    hc = runCompressedHcDecision(graph, "Sudoku compressed HC reduction");
+  if (compactMode && prepared.simplified.contradiction) {
+    append(lines, "NP-douce HC solver result:");
+    append(lines, "HC solver skipped because exact unit propagation already proved the Sudoku constraints impossible.");
+    append(lines, "Sudoku answer inferred from HC: NO SOLUTION");
+  } else {
+    append(lines, "Compressed HC reduction size:");
+    append(lines, `base directed nodes = ${stats.baseDirected}`);
+    append(lines, `total directed nodes = ${stats.directedCount}`);
+    append(lines, `undirected HC nodes = ${stats.n}`);
+    append(lines, `directed arcs = ${stats.arcCount}`);
+    append(lines);
+    append(lines, "Degree-2 forced-edge precheck:");
+    if (compactMode) {
+      append(lines, `vertices with exactly two HC edges = ${stats.forcedVertexCount}`);
+      append(lines, `forced HC edges = ${stats.forcedEdgeCount}`);
+      append(lines, `forced edge total = ${formatNumber(stats.forcedEdgeTotal)}`);
+    } else {
+      append(lines, "not materialized for 25x25 mode, because building every HC edge would be too much memory for a browser or phone");
+    }
+  }
+  append(lines);
+  if (compactMode && !prepared.simplified.contradiction && stats.n <= denseLimit) {
+    hc = runCompressedHcDecision(prepared.graph, "Sudoku compressed HC reduction");
     append(lines, hc.summary);
     append(lines);
     append(lines, inferredAnswerLine(hc, "Sudoku", "SOLUTION EXISTS", "NO SOLUTION"));
@@ -2648,7 +2613,7 @@ function runSudoku() {
         append(lines, formatSudokuGrid(solution, puzzle.symbols));
       }
     }
-  } else {
+  } else if (!compactMode || !prepared.simplified.contradiction) {
     append(lines, "NP-douce HC solver result:");
     append(lines, `HC solver not run because ${stats.n} nodes is above the safety limit ${denseLimit}${compactMode ? "" : " or the Sudoku is in 25x25 large mode"}.`);
     append(lines, "Sudoku answer inferred from HC: NOT COMPUTED");
@@ -3067,8 +3032,7 @@ function runPacking3d() {
   const packed = packBoxesExtremePoint(input);
   drawPackingScene(input.truck, packed.placed);
   const reduction = buildPackingCandidateReduction(input, packed);
-  const graph = buildCompressedReductionGraph(reduction.variableCount, reduction.clauses, 0);
-  const forced = findDegreeTwoForcedEdges(graph.edge, graph.n);
+  const prepared = prepareCompressedSatForHc(reduction, 0);
   const truckVolume = input.truck.l * input.truck.w * input.truck.h;
   const totalBoxVolume = packed.items.reduce((sum, item) => sum + item.volume, 0);
   const totalBoxWeight = packed.items.reduce((sum, item) => sum + item.weight, 0);
@@ -3108,24 +3072,11 @@ function runPacking3d() {
   append(lines, `max packing options sent to HC = ${input.candidateBudget}`);
   append(lines, `generated candidates = ${reduction.generatedCandidates}`);
   append(lines, `kept candidates = ${reduction.keptCandidates}${reduction.pruned ? " (pruned for low nodes)" : ""}`);
-  append(lines, `SAT variables including auxiliary = ${reduction.variableCount}`);
+  append(lines, `SAT variables before simplification = ${reduction.variableCount}`);
   append(lines, `CNF clauses before 3-literal normalization = ${reduction.rawClauseCount}`);
-  append(lines, `3-SAT clauses = ${reduction.clauses.length}`);
+  append(lines, `3-SAT clauses before simplification = ${reduction.clauses.length}`);
   if (reduction.impossibleReasons.length) append(lines, `necessary impossibility check = ${reduction.impossibleReasons.join("; ")}`);
-  append(lines);
-  append(lines, "Compressed HC reduction size:");
-  append(lines, `base directed nodes = ${graph.baseDirected}`);
-  append(lines, `undirected HC nodes = ${graph.n}`);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
-  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
-  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
-  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
-  append(lines);
-  const hc = runCompressedHcDecision(graph, "3D packing candidate-placement compressed HC reduction");
-  append(lines, hc.summary);
-  append(lines);
-  append(lines, inferredAnswerLine(hc, "Packing candidate model"));
+  appendPreparedHcReduction(lines, prepared, "3D packing candidate-placement compressed HC reduction", "Packing candidate model");
   append(lines, "The manifest above is a visual/practical placement guide; the YES/NO line comes from the HC solver.");
   append(lines, "Higher max packing options send more possibilities into HC, creating more nodes and slower runs.");
   return lines.join("\n");
@@ -3139,14 +3090,235 @@ function formatFormula(clauses) {
   return clauses.map(clause => `(${clause.map(literalText).join(" OR ")})`).join(" AND ");
 }
 
+function normalizeClauseLiterals(literals) {
+  const seen = new Set();
+  const normalized = [];
+  for (const literal of literals) {
+    if (seen.has(-literal)) return { tautology: true, literals: [] };
+    if (seen.has(literal)) continue;
+    seen.add(literal);
+    normalized.push(literal);
+  }
+  return { tautology: false, literals: normalized };
+}
+
+function simplify3SatForHc(variableCount, clauses) {
+  let activeClauses = [];
+  let tautologyClauses = 0;
+  let satisfiedClauses = 0;
+  let forcedAssignments = 0;
+  const assignment = Array(variableCount + 1).fill(0);
+
+  for (const clause of clauses) {
+    const normalized = normalizeClauseLiterals(clause);
+    if (normalized.tautology) {
+      tautologyClauses += 1;
+    } else {
+      activeClauses.push(normalized.literals);
+    }
+  }
+
+  while (true) {
+    const nextClauses = [];
+    const units = [];
+
+    for (const clause of activeClauses) {
+      let satisfied = false;
+      const remaining = [];
+      for (const literal of clause) {
+        const variable = Math.abs(literal);
+        const value = assignment[variable] || 0;
+        if (value === 0) {
+          remaining.push(literal);
+        } else if ((literal > 0 && value === 1) || (literal < 0 && value === -1)) {
+          satisfied = true;
+          break;
+        }
+      }
+      if (satisfied) {
+        satisfiedClauses += 1;
+        continue;
+      }
+
+      const normalized = normalizeClauseLiterals(remaining);
+      if (normalized.tautology) {
+        tautologyClauses += 1;
+        continue;
+      }
+      if (normalized.literals.length === 0) {
+        return {
+          variableCount,
+          clauses: [],
+          assignment,
+          contradiction: true,
+          contradictionReason: "a clause became empty during unit propagation",
+          originalClauseCount: clauses.length,
+          simplifiedClauseCount: 0,
+          finalClauseCount: 0,
+          tautologyClauses,
+          satisfiedClauses,
+          forcedAssignments,
+          binaryExpandedClauses: 0,
+          auxiliaryVariablesAdded: 0
+        };
+      }
+      if (normalized.literals.length === 1) units.push(normalized.literals[0]);
+      nextClauses.push(normalized.literals);
+    }
+
+    let changed = false;
+    for (const literal of units) {
+      const variable = Math.abs(literal);
+      const desired = literal > 0 ? 1 : -1;
+      if (assignment[variable] !== 0 && assignment[variable] !== desired) {
+        return {
+          variableCount,
+          clauses: [],
+          assignment,
+          contradiction: true,
+          contradictionReason: `unit clauses force both x${variable} and ~x${variable}`,
+          originalClauseCount: clauses.length,
+          simplifiedClauseCount: 0,
+          finalClauseCount: 0,
+          tautologyClauses,
+          satisfiedClauses,
+          forcedAssignments,
+          binaryExpandedClauses: 0,
+          auxiliaryVariablesAdded: 0
+        };
+      }
+      if (assignment[variable] === 0) {
+        assignment[variable] = desired;
+        forcedAssignments += 1;
+        changed = true;
+      }
+    }
+
+    activeClauses = nextClauses;
+    if (!changed) break;
+  }
+
+  const simplifiedClauseCount = activeClauses.length;
+  const finalClauses = [];
+  let nextVariable = variableCount;
+  let binaryExpandedClauses = 0;
+
+  for (const clause of activeClauses) {
+    if (clause.length === 2) {
+      finalClauses.push(clause);
+      binaryExpandedClauses += 1;
+    } else if (clause.length === 3) {
+      finalClauses.push(clause);
+    } else if (clause.length > 3) {
+      let previousAux = ++nextVariable;
+      finalClauses.push([clause[0], clause[1], previousAux]);
+      for (let index = 2; index < clause.length - 2; index++) {
+        const nextAux = ++nextVariable;
+        finalClauses.push([-previousAux, clause[index], nextAux]);
+        previousAux = nextAux;
+      }
+      finalClauses.push([-previousAux, clause[clause.length - 2], clause[clause.length - 1]]);
+    }
+  }
+
+  return {
+    variableCount: nextVariable,
+    clauses: finalClauses,
+    assignment,
+    contradiction: false,
+    contradictionReason: "",
+    originalClauseCount: clauses.length,
+    simplifiedClauseCount,
+    finalClauseCount: finalClauses.length,
+    tautologyClauses,
+    satisfiedClauses,
+    forcedAssignments,
+    binaryExpandedClauses,
+    auxiliaryVariablesAdded: nextVariable - variableCount
+  };
+}
+
+function forcedAssignmentText(assignment) {
+  const values = [];
+  for (let variable = 1; variable < assignment.length; variable++) {
+    if (assignment[variable] === 1) values.push(`x${variable}=true`);
+    if (assignment[variable] === -1) values.push(`x${variable}=false`);
+  }
+  return values.join(", ") || "(none)";
+}
+
+function appendSatSimplificationSummary(lines, simplified) {
+  append(lines, "Exact unit-clause simplification before HC:");
+  append(lines, `unit-forced assignments = ${simplified.forcedAssignments}`);
+  append(lines, `forced values = ${forcedAssignmentText(simplified.assignment)}`);
+  append(lines, `clauses removed as satisfied = ${simplified.satisfiedClauses}`);
+  append(lines, `tautology clauses removed = ${simplified.tautologyClauses}`);
+  append(lines, `clauses left after unit propagation = ${simplified.simplifiedClauseCount}`);
+  append(lines, `binary clauses kept without duplicate gadget ports = ${simplified.binaryExpandedClauses}`);
+  append(lines, `auxiliary variables added by simplification = ${simplified.auxiliaryVariablesAdded}`);
+  append(lines, `3-SAT clauses sent to HC = ${simplified.finalClauseCount}`);
+  if (simplified.contradiction) append(lines, `contradiction = ${simplified.contradictionReason}`);
+}
+
+function prepareCompressedSatForHc(sat, padding) {
+  const simplified = simplify3SatForHc(sat.variableCount, sat.clauses);
+  if (simplified.contradiction) {
+    return { simplified, graph: null, forced: null };
+  }
+  const graph = buildCompressedReductionGraph(simplified.variableCount, simplified.clauses, padding);
+  const forced = findDegreeTwoForcedEdges(graph.edge, graph.n);
+  return { simplified, graph, forced };
+}
+
+function appendPreparedHcReduction(lines, prepared, sourceLabel, answerLabel, yesText = "YES", noText = "NO") {
+  append(lines);
+  appendSatSimplificationSummary(lines, prepared.simplified);
+  if (prepared.simplified.contradiction) {
+    append(lines);
+    append(lines, "NP-douce HC solver result:");
+    append(lines, "HC solver skipped because exact unit propagation already proved the reduced SAT formula impossible.");
+    append(lines);
+    append(lines, `${answerLabel} answer after exact unit simplification: ${noText}`);
+    return { text: "", summary: "", totalTourCost: NaN, hamiltonianFound: false, notComputed: true };
+  }
+
+  append(lines);
+  append(lines, "Compressed HC reduction size:");
+  append(lines, `base directed nodes = ${prepared.graph.baseDirected}`);
+  append(lines, `total directed nodes = ${prepared.graph.directedCount}`);
+  append(lines, `undirected HC nodes = ${prepared.graph.n}`);
+  append(lines);
+  append(lines, "Degree-2 forced-edge precheck:");
+  append(lines, `vertices with exactly two HC edges = ${prepared.forced.forcedVertexCount}`);
+  append(lines, `forced HC edges = ${prepared.forced.forcedEdgeCount}`);
+  append(lines, `forced edge total = ${formatNumber(prepared.forced.forcedEdgeTotal)}`);
+  append(lines);
+  const hc = runCompressedHcDecision(prepared.graph, sourceLabel);
+  append(lines, hc.summary);
+  append(lines);
+  append(lines, inferredAnswerLine(hc, answerLabel, yesText, noText));
+  return hc;
+}
+
 function run3SatCompressed(text) {
   const { variableCount, clauseCount, padding, clauses } = parse3Sat(text);
-  const graph = buildCompressedReductionGraph(variableCount, clauses, padding);
+  const prepared = prepareCompressedSatForHc({ variableCount, clauses }, padding);
+  const { simplified, graph, forced } = prepared;
   const lines = [];
   append(lines, "3-SAT instance:");
   append(lines, `variables = ${variableCount}`);
   append(lines, `clauses = ${clauseCount}`);
   append(lines, `Formula: ${formatFormula(clauses)}`);
+  append(lines);
+  appendSatSimplificationSummary(lines, simplified);
+  if (simplified.contradiction) {
+    append(lines);
+    append(lines, "NP-douce HC solver result:");
+    append(lines, "HC solver skipped because exact unit propagation already proved the formula impossible.");
+    append(lines);
+    append(lines, "Original 3-SAT answer after exact unit simplification: UNSATISFIABLE");
+    return lines.join("\n");
+  }
   append(lines);
   append(lines, "Compressed polynomial reduction size:");
   append(lines, `base directed nodes = ${graph.baseDirected}`);
@@ -3154,7 +3326,6 @@ function run3SatCompressed(text) {
   append(lines, `total directed nodes = ${graph.directedCount}`);
   append(lines, `undirected HC nodes = ${graph.n}`);
 
-  const forced = findDegreeTwoForcedEdges(graph.edge, graph.n);
   append(lines);
   append(lines, "Degree-2 forced-edge precheck:");
   append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);

@@ -36,11 +36,13 @@ If the compressed HC graph is above the app's `HC solve node limit`, the tab rep
 
 Compressed reductions now run the HC solver over the full set of real allowed HC edges from the start. They still skip zero-weight non-edges, because those cannot contribute to the target `-n` Hamiltonian tour.
 
+Before the compressed HC graph is built, reduction tabs run an exact unit-clause simplification on the generated 3-SAT formula. A clause like `[-3, -3, -3]` is treated as the unit clause `~x3`, so `x3=false` is forced, satisfied clauses are removed, and only the remaining formula is sent into the HC scorer. Binary clauses are kept as two-literal clauses internally instead of duplicating one literal, which avoids duplicate clause-gadget ports and usually reduces the HC node count.
+
 `HC beta multiplier` controls the beta temperature used by the reduction solver. The app computes its suggested beta from the graph variance, then multiplies it by this value, so `0.25` means one-quarter of the suggested beta.
 
 `adaptive beta` changes beta during the HC solve. When it is on, each choice step recomputes the current conditioned standard deviation and uses `beta multiplier / current standard deviation`.
 
-`HC backtrack tries` lets the HC solver revisit close decisions. The score formula ranks every valid edge, the greedy edge is tried first, and alternate branches are kept when their score is close to the best edge. Higher values can improve accuracy but may run much slower.
+`HC backtrack tries` lets the HC solver revisit close decisions. The score formula ranks every valid edge, the greedy edge is tried first, and alternate branches are kept only when their log-score is tied with the best edge up to numerical tolerance. Each choice keeps at most two smart alternatives, and the total branch limit is capped by a polynomial edge-count guard. The app defaults this to `25` because small reduction gadgets often need a few tie branches; higher values can improve accuracy but may run much slower.
 
 Candidate edges are normalized with the state function omega. For each valid edge, the app uses the count term `N(e) = 2^(CE - 1) * (n - 1 - VCE + CE)!`, computes `L(e) = ln(N(e)) - beta * mean + 0.5 * beta^2 * variance`, shifts by `M = max L`, then uses `P(e) = exp(L(e) - M) / omega` with `omega = sum exp(L(f) - M)`.
 
