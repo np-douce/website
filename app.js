@@ -65,46 +65,28 @@ function computeTheoryMoments(edge, edgeSquared, n) {
   };
   const vertexCount = n;
   let edgeSum = 0;
+  const incidentEdges = Array.from({ length: n + 1 }, () => []);
   for (let i = 1; i < n; i++) {
-    for (let j = i + 1; j <= n; j++) edgeSum += edge[i][j];
+    for (let j = i + 1; j <= n; j++) {
+      const weight = edge[i][j];
+      edgeSum += weight;
+      moments.selfInteractionSum += edgeSquared[i][j];
+      if (weight === 0) continue;
+      incidentEdges[i].push(weight);
+      incidentEdges[j].push(weight);
+    }
   }
   moments.meanTourLength = (2.0 / (vertexCount - 1.0)) * edgeSum;
 
   for (let i = 1; i <= n; i++) {
-    for (let j = i + 1; j <= n; j++) moments.selfInteractionSum += edgeSquared[i][j];
-  }
-
-  const nonZeroEdges = [];
-  const incidentEdges = Array.from({ length: n + 1 }, () => []);
-  for (let i = 1; i <= n; i++) {
-    for (let j = i + 1; j <= n; j++) {
-      const weight = edge[i][j];
-      if (weight === 0) continue;
-      nonZeroEdges.push({ from: i, to: j, weight });
-      incidentEdges[i].push({ from: i, to: j, weight });
-      incidentEdges[j].push({ from: j, to: i, weight });
-    }
-  }
-
-  for (let i = 1; i <= n; i++) {
     for (let first = 0; first < incidentEdges[i].length; first++) {
       for (let second = first + 1; second < incidentEdges[i].length; second++) {
-        moments.neighborInteractionSum += incidentEdges[i][first].weight * incidentEdges[i][second].weight;
+        moments.neighborInteractionSum += incidentEdges[i][first] * incidentEdges[i][second];
       }
     }
   }
-
-  for (let first = 0; first < nonZeroEdges.length; first++) {
-    const firstEdge = nonZeroEdges[first];
-    for (let second = first + 1; second < nonZeroEdges.length; second++) {
-      const secondEdge = nonZeroEdges[second];
-      if (firstEdge.from === secondEdge.from || firstEdge.from === secondEdge.to ||
-          firstEdge.to === secondEdge.from || firstEdge.to === secondEdge.to) {
-        continue;
-      }
-      moments.disjointInteractionSum += firstEdge.weight * secondEdge.weight;
-    }
-  }
+  const allEdgePairProduct = ((edgeSum * edgeSum) - moments.selfInteractionSum) * 0.5;
+  moments.disjointInteractionSum = allEdgePairProduct - moments.neighborInteractionSum;
 
   moments.tourVariance =
     ((2.0 / (vertexCount - 1.0)) * moments.selfInteractionSum) +
@@ -113,6 +95,10 @@ function computeTheoryMoments(edge, edgeSquared, n) {
     (moments.meanTourLength * moments.meanTourLength);
 
   return moments;
+}
+
+function pairProductFromSumAndSquares(sum, squareSum) {
+  return ((sum * sum) - squareSum) * 0.5;
 }
 
 function collectAvailableVertices(endpointLink, n) {
@@ -165,7 +151,16 @@ function accumulateRemainingEdgeBuckets(availableVertices, endpointLink, edge, e
 }
 
 function accumulateVarianceBuckets(availableVertices, endpointLink, edge, buckets) {
-  const remainingEdges = [];
+  const vertexCapacity = endpointLink.length;
+  const activeFreeByActive = Array(vertexCapacity).fill(0);
+  const activeFreeSquareByActive = Array(vertexCapacity).fill(0);
+  const activeFreeByFree = Array(vertexCapacity).fill(0);
+  const activeFreeSquareByFree = Array(vertexCapacity).fill(0);
+  const freeFreeByFree = Array(vertexCapacity).fill(0);
+  const freeFreeSquareByFree = Array(vertexCapacity).fill(0);
+  const activeActiveByActive = Array(vertexCapacity).fill(0);
+  const activeActiveEdges = [];
+
   for (let fromIndex = 0; fromIndex < availableVertices.length; fromIndex++) {
     const from = availableVertices[fromIndex];
     const fromLink = endpointLink[from];
@@ -174,14 +169,66 @@ function accumulateVarianceBuckets(availableVertices, endpointLink, edge, bucket
       const toLink = endpointLink[to];
       if (fromLink === to || toLink === from) continue;
       const weight = edge[from][to];
-      if (weight !== 0) remainingEdges.push({ from, to, fromLink, toLink, weight });
+      const weightSquared = weight * weight;
+
+      if ((fromLink === 0 && toLink !== 0) || (fromLink !== 0 && toLink === 0)) {
+        const active = fromLink !== 0 ? from : to;
+        const free = fromLink === 0 ? from : to;
+        activeFreeByActive[active] += weight;
+        activeFreeSquareByActive[active] += weightSquared;
+        activeFreeByFree[free] += weight;
+        activeFreeSquareByFree[free] += weightSquared;
+      } else if (fromLink === 0 && toLink === 0) {
+        freeFreeByFree[from] += weight;
+        freeFreeSquareByFree[from] += weightSquared;
+        freeFreeByFree[to] += weight;
+        freeFreeSquareByFree[to] += weightSquared;
+      } else {
+        activeActiveByActive[from] += weight;
+        activeActiveByActive[to] += weight;
+        if (weight !== 0) activeActiveEdges.push({ from, to, fromLink, toLink, weight });
+      }
     }
   }
 
-  for (let firstIndex = 0; firstIndex < remainingEdges.length; firstIndex++) {
-    const first = remainingEdges[firstIndex];
-    for (let secondIndex = firstIndex + 1; secondIndex < remainingEdges.length; secondIndex++) {
-      const second = remainingEdges[secondIndex];
+  let activeFreeSameActivePairSum = 0;
+  let activeFreeSameFreePairSum = 0;
+  let activeFreeMateSameFreePairSum = 0;
+  let freeFreeTouchingPairSum = 0;
+  let activeFreeFreeTouchingPairSum = 0;
+  let mixedOpenSharedActivePairSum = 0;
+  for (const vertex of availableVertices) {
+    activeFreeSameActivePairSum += pairProductFromSumAndSquares(activeFreeByActive[vertex], activeFreeSquareByActive[vertex]);
+    activeFreeSameFreePairSum += pairProductFromSumAndSquares(activeFreeByFree[vertex], activeFreeSquareByFree[vertex]);
+    freeFreeTouchingPairSum += pairProductFromSumAndSquares(freeFreeByFree[vertex], freeFreeSquareByFree[vertex]);
+    activeFreeFreeTouchingPairSum += activeFreeByFree[vertex] * freeFreeByFree[vertex];
+    mixedOpenSharedActivePairSum += activeActiveByActive[vertex] * activeFreeByActive[vertex];
+  }
+
+  for (const free of availableVertices) {
+    if (endpointLink[free] !== 0) continue;
+    for (const active of availableVertices) {
+      const mate = endpointLink[active];
+      if (mate <= active || mate >= vertexCapacity || endpointLink[mate] !== active) continue;
+      activeFreeMateSameFreePairSum += edge[active][free] * edge[mate][free];
+    }
+  }
+
+  const activeFreePairSum = pairProductFromSumAndSquares(buckets.activeFreeSum, buckets.activeFreeSquareSum);
+  const freeFreePairSum = pairProductFromSumAndSquares(buckets.freeFreeSum, buckets.freeFreeSquareSum);
+  buckets.activeFreeTouchingPairSum += activeFreeSameFreePairSum - activeFreeMateSameFreePairSum;
+  buckets.activeFreeDisjointPairSum += activeFreePairSum - activeFreeSameActivePairSum - activeFreeSameFreePairSum;
+  buckets.freeFreeTouchingPairSum += freeFreeTouchingPairSum;
+  buckets.freeFreeDisjointPairSum += freeFreePairSum - freeFreeTouchingPairSum;
+  buckets.mixedOpenTouchingPairSum += (buckets.activeActiveOpenSum * buckets.activeFreeSum) - mixedOpenSharedActivePairSum;
+  buckets.mixedOpenFreePairSum += buckets.activeActiveOpenSum * buckets.freeFreeSum;
+  buckets.activeFreeFreeTouchingPairSum += activeFreeFreeTouchingPairSum;
+  buckets.activeFreeFreeDisjointPairSum += (buckets.activeFreeSum * buckets.freeFreeSum) - activeFreeFreeTouchingPairSum;
+
+  for (let firstIndex = 0; firstIndex < activeActiveEdges.length; firstIndex++) {
+    const first = activeActiveEdges[firstIndex];
+    for (let secondIndex = firstIndex + 1; secondIndex < activeActiveEdges.length; secondIndex++) {
+      const second = activeActiveEdges[secondIndex];
       const c = first.from, g = first.to, p = second.from, k = second.to;
       const cLink = first.fromLink, gLink = first.toLink;
       const pLink = second.fromLink, kLink = second.toLink;
@@ -197,42 +244,7 @@ function accumulateVarianceBuckets(availableVertices, endpointLink, edge, bucket
       if ((cLink === p && gLink === k) || (cLink === k && gLink === p)) continue;
 
       const product = first.weight * second.weight;
-      if (kLink !== 0 && pLink !== 0 && cLink !== 0 && gLink !== 0) {
-        buckets.activeActiveOpenPairSum += product;
-      }
-      if ((cLink !== 0 && gLink === 0 && pLink !== 0 && kLink === 0 && g === k) ||
-          (cLink !== 0 && gLink === 0 && pLink === 0 && kLink !== 0 && g === p) ||
-          (cLink === 0 && gLink !== 0 && pLink !== 0 && kLink === 0 && c === k) ||
-          (cLink === 0 && gLink !== 0 && pLink === 0 && kLink !== 0 && c === p)) {
-        buckets.activeFreeTouchingPairSum += product;
-      }
-      if ((cLink !== 0 && gLink === 0 && pLink !== 0 && kLink === 0 && g !== k) ||
-          (cLink !== 0 && gLink === 0 && pLink === 0 && kLink !== 0 && g !== p) ||
-          (cLink === 0 && gLink !== 0 && pLink !== 0 && kLink === 0 && c !== k) ||
-          (cLink === 0 && gLink !== 0 && pLink === 0 && kLink !== 0 && c !== p)) {
-        buckets.activeFreeDisjointPairSum += product;
-      }
-      if (cLink === 0 && gLink === 0 && pLink === 0 && kLink === 0) {
-        if (c === k || c === p || g === k || g === p) buckets.freeFreeTouchingPairSum += product;
-        else buckets.freeFreeDisjointPairSum += product;
-      }
-      if ((cLink !== 0 && gLink !== 0 && pLink === 0 && kLink !== 0) ||
-          (cLink !== 0 && gLink !== 0 && pLink !== 0 && kLink === 0) ||
-          (cLink === 0 && gLink !== 0 && pLink !== 0 && kLink !== 0) ||
-          (cLink !== 0 && gLink === 0 && pLink !== 0 && kLink !== 0)) {
-        buckets.mixedOpenTouchingPairSum += product;
-      }
-      if ((cLink !== 0 && gLink !== 0 && pLink === 0 && kLink === 0) ||
-          (cLink === 0 && gLink === 0 && pLink !== 0 && kLink !== 0)) {
-        buckets.mixedOpenFreePairSum += product;
-      }
-      if ((cLink !== 0 && gLink === 0 && pLink === 0 && kLink === 0) ||
-          (cLink === 0 && gLink !== 0 && pLink === 0 && kLink === 0) ||
-          (cLink === 0 && gLink === 0 && pLink !== 0 && kLink === 0) ||
-          (cLink === 0 && gLink === 0 && pLink === 0 && kLink !== 0)) {
-        if (c === p || c === k || g === k || g === p) buckets.activeFreeFreeTouchingPairSum += product;
-        else buckets.activeFreeFreeDisjointPairSum += product;
-      }
+      buckets.activeActiveOpenPairSum += product;
     }
   }
 }
@@ -846,7 +858,7 @@ function finishTourFromState(edge, n, endpointLink, state, options) {
   if (forced.exists) {
     append(lines, `The biggest probability is 1 at Edge[${forced.from}][${forced.to}].`);
     totalTourCost += forced.weight;
-    state.chosenEdges.push({ from: forced.from, to: forced.to, weight: forced.weight });
+    if (state.chosenEdges) state.chosenEdges.push({ from: forced.from, to: forced.to, weight: forced.weight });
   }
 
   const repairPasses = Math.max(0, Math.floor(Number(options.repairPasses || 0)));
@@ -1040,7 +1052,7 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
     append(lines, bestFinal.lines.join("\n"));
     return {
       lines,
-      totalTourCost: bestFinal.rejected ? NaN : bestFinal.totalTourCost,
+      totalTourCost: bestFinal.totalTourCost,
       partialTourCost: bestFinal.totalTourCost,
       hamiltonianFound: bestFinal.hamiltonianFound
     };
@@ -1695,6 +1707,147 @@ function buildComplementEdges(n, edges) {
     }
   }
   return complement;
+}
+
+function normalizeUndirectedEdges(n, edges) {
+  const seen = new Set();
+  const normalized = [];
+  for (const edgePair of edges) {
+    let [u, v] = edgePair;
+    if (u > v) [u, v] = [v, u];
+    if (u < 1 || v < 1 || u > n || v > n || u === v) continue;
+    const key = `${u}:${v}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push([u, v]);
+  }
+  return normalized;
+}
+
+function buildYesTriangleGraph() {
+  const edge = makeMatrix(3);
+  const allowedEdgeKeys = new Set();
+  const add = (from, to) => {
+    edge[from][to] = -1;
+    edge[to][from] = -1;
+    allowedEdgeKeys.add(edgeKey(from, to));
+  };
+  add(1, 2);
+  add(2, 3);
+  add(3, 1);
+  return {
+    edge,
+    n: 3,
+    allowedEdgeKeys,
+    gadgetCount: 0,
+    selectorSlots: 0,
+    paddingNodes: 0,
+    directYes: true
+  };
+}
+
+function buildDirectVertexCoverHcGraph(vertexCount, coverLimit, edges, padding = 0) {
+  const normalizedEdges = normalizeUndirectedEdges(vertexCount, edges);
+  if (normalizedEdges.length === 0) return buildYesTriangleGraph();
+
+  const selectorSlots = Math.min(coverLimit, vertexCount);
+  let nextNode = 1;
+  const gadgetRows = [];
+  const incidentRows = Array.from({ length: vertexCount + 1 }, () => []);
+
+  for (let edgeIndex = 0; edgeIndex < normalizedEdges.length; edgeIndex++) {
+    const [u, v] = normalizedEdges[edgeIndex];
+    const uRow = Array.from({ length: 6 }, () => nextNode++);
+    const vRow = Array.from({ length: 6 }, () => nextNode++);
+    const uInfo = { vertex: u, edgeIndex, start: uRow[0], end: uRow[5], nodes: uRow };
+    const vInfo = { vertex: v, edgeIndex, start: vRow[0], end: vRow[5], nodes: vRow };
+    gadgetRows.push({ u, v, uRow, vRow, uInfo, vInfo });
+    incidentRows[u].push(uInfo);
+    incidentRows[v].push(vInfo);
+  }
+
+  const selectors = [];
+  for (let slot = 0; slot < selectorSlots; slot++) {
+    selectors.push({ entry: nextNode++, exit: nextNode++ });
+  }
+  const paddingNodes = Array.from({ length: Math.max(0, padding) }, () => nextNode++);
+  const totalNodes = nextNode - 1;
+  const edge = makeMatrix(totalNodes);
+  const allowedEdgeKeys = new Set();
+  const decisionEdgeKeys = new Set();
+
+  const add = (from, to, decision = false) => {
+    if (from === to) return;
+    edge[from][to] = -1;
+    edge[to][from] = -1;
+    const key = edgeKey(from, to);
+    allowedEdgeKeys.add(key);
+    if (decision) decisionEdgeKeys.add(key);
+  };
+
+  for (const gadget of gadgetRows) {
+    for (let i = 0; i < 5; i++) {
+      add(gadget.uRow[i], gadget.uRow[i + 1]);
+      add(gadget.vRow[i], gadget.vRow[i + 1]);
+    }
+    add(gadget.uRow[0], gadget.vRow[2], true);
+    add(gadget.vRow[0], gadget.uRow[2], true);
+    add(gadget.uRow[5], gadget.vRow[3], true);
+    add(gadget.uRow[3], gadget.vRow[5], true);
+  }
+
+  const vertexPaths = [];
+  for (let vertex = 1; vertex <= vertexCount; vertex++) {
+    const rows = incidentRows[vertex].sort((a, b) => a.edgeIndex - b.edgeIndex);
+    if (rows.length === 0) continue;
+    for (let index = 0; index + 1 < rows.length; index++) {
+      add(rows[index].end, rows[index + 1].start, true);
+    }
+    vertexPaths.push({
+      vertex,
+      start: rows[0].start,
+      end: rows[rows.length - 1].end,
+      rowCount: rows.length
+    });
+  }
+
+  if (selectorSlots > 0) {
+    for (let slot = 0; slot < selectors.length; slot++) {
+      const selector = selectors[slot];
+      add(selector.entry, selector.exit, true);
+      for (const path of vertexPaths) {
+        add(selector.entry, path.start, true);
+        add(selector.entry, path.end, true);
+        add(selector.exit, path.start, true);
+        add(selector.exit, path.end, true);
+      }
+      if (slot + 1 < selectors.length) {
+        add(selector.exit, selectors[slot + 1].entry);
+      }
+    }
+    const lastExit = selectors[selectors.length - 1].exit;
+    const firstEntry = selectors[0].entry;
+    if (paddingNodes.length === 0) {
+      add(lastExit, firstEntry);
+    } else {
+      add(lastExit, paddingNodes[0]);
+      for (let index = 0; index + 1 < paddingNodes.length; index++) add(paddingNodes[index], paddingNodes[index + 1]);
+      add(paddingNodes[paddingNodes.length - 1], firstEntry);
+    }
+  }
+
+  return {
+    edge,
+    n: totalNodes,
+    allowedEdgeKeys,
+    decisionEdgeKeys,
+    gadgetCount: normalizedEdges.length,
+    selectorSlots,
+    selectors,
+    paddingNodes: paddingNodes.length,
+    vertexPaths,
+    normalizedEdges
+  };
 }
 
 function findClique(n, k, edges) {
@@ -2465,25 +2618,168 @@ function summarizeLargeSudokuReduction(puzzle) {
   };
 }
 
+function appendDirectVertexCoverHcReduction(lines, graph, sourceLabel, answerLabel, yesText = "YES", noText = "NO") {
+  append(lines);
+  append(lines, "Direct Vertex Cover -> Hamiltonian Cycle reduction size:");
+  append(lines, `edge gadgets = ${graph.gadgetCount}`);
+  append(lines, `12-node gadget vertices = ${12 * graph.gadgetCount}`);
+  append(lines, `selector slots = ${graph.selectorSlots}`);
+  append(lines, `padding nodes = ${graph.paddingNodes || 0}`);
+  append(lines, `undirected HC nodes = ${graph.n}`);
+  append(lines, `allowed HC edges = ${graph.allowedEdgeKeys ? graph.allowedEdgeKeys.size : 0}`);
+  if (graph.decisionEdgeKeys) append(lines, `decision-style edges = ${graph.decisionEdgeKeys.size}`);
+
+  const forced = findDegreeTwoForcedEdges(graph.edge, graph.n);
+  append(lines);
+  append(lines, "Degree-2 forced-edge precheck:");
+  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
+  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
+  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
+
+  const hc = runCompressedHcDecision(graph, sourceLabel);
+  append(lines);
+  append(lines, hc.summary);
+  append(lines);
+  append(lines, inferredAnswerLine(hc, answerLabel, yesText, noText));
+  return hc;
+}
+
+function clauseLiteralsForVertexCoverTriangle(clause) {
+  if (clause.length === 1) return [clause[0], clause[0], clause[0]];
+  if (clause.length === 2) return [clause[0], clause[1], clause[1]];
+  if (clause.length === 3) return clause.slice();
+  throw new Error("3-SAT to Vertex Cover expects clauses with one, two, or three literals after normalization.");
+}
+
+function estimateSatToVertexCoverReduction(variableCount, clauseCount, padding = 0) {
+  const vertexCoverVertices = (2 * variableCount) + (3 * clauseCount);
+  const vertexCoverEdges = variableCount + (6 * clauseCount);
+  const vertexCoverTarget = variableCount + (2 * clauseCount);
+  const selectorSlots = Math.min(vertexCoverTarget, vertexCoverVertices);
+  const hcNodes = (12 * vertexCoverEdges) + (2 * selectorSlots) + padding;
+  return {
+    variableCount,
+    clauseCount,
+    vertexCoverVertices,
+    vertexCoverEdges,
+    vertexCoverTarget,
+    selectorSlots,
+    hcNodes,
+    padding
+  };
+}
+
+function buildSatToVertexCoverInstance(variableCount, clauses, padding = 0) {
+  const edges = [];
+  const add = (u, v) => {
+    if (u === v) return;
+    edges.push([u, v]);
+  };
+  const positiveVertex = variable => (2 * variable) - 1;
+  const negativeVertex = variable => 2 * variable;
+  const literalVertex = literal => literal > 0 ? positiveVertex(literal) : negativeVertex(-literal);
+
+  for (let variable = 1; variable <= variableCount; variable++) {
+    add(positiveVertex(variable), negativeVertex(variable));
+  }
+
+  for (let clauseIndex = 0; clauseIndex < clauses.length; clauseIndex++) {
+    const literals = clauseLiteralsForVertexCoverTriangle(clauses[clauseIndex]);
+    const base = (2 * variableCount) + (3 * clauseIndex) + 1;
+    const a = base;
+    const b = base + 1;
+    const c = base + 2;
+    add(a, b);
+    add(b, c);
+    add(a, c);
+    add(a, literalVertex(literals[0]));
+    add(b, literalVertex(literals[1]));
+    add(c, literalVertex(literals[2]));
+  }
+
+  return {
+    n: (2 * variableCount) + (3 * clauses.length),
+    k: variableCount + (2 * clauses.length),
+    padding,
+    edges,
+    variableCount,
+    clauseCount: clauses.length
+  };
+}
+
+function prepareSatViaVertexCoverForHc(sat, padding, materializeLimit = getHcSolveNodeLimit()) {
+  const simplified = simplify3SatForHc(sat.variableCount, sat.clauses);
+  if (simplified.contradiction) {
+    return { simplified, vertexCover: null, graph: null, stats: null, skipped: false };
+  }
+
+  const stats = estimateSatToVertexCoverReduction(simplified.variableCount, simplified.clauses.length, padding);
+  if (stats.hcNodes > materializeLimit) {
+    return {
+      simplified,
+      vertexCover: null,
+      graph: null,
+      stats,
+      skipped: true,
+      skipReason: `${stats.hcNodes} HC nodes is above the HC solve node limit ${materializeLimit}`
+    };
+  }
+
+  const vertexCover = buildSatToVertexCoverInstance(simplified.variableCount, simplified.clauses, padding);
+  const graph = buildDirectVertexCoverHcGraph(vertexCover.n, vertexCover.k, vertexCover.edges, padding);
+  return { simplified, vertexCover, graph, stats, skipped: false };
+}
+
+function appendSatViaVertexCoverHcReduction(lines, prepared, sourceLabel, answerLabel, yesText = "YES", noText = "NO") {
+  append(lines);
+  appendSatSimplificationSummary(lines, prepared.simplified);
+  if (prepared.simplified.contradiction) {
+    append(lines);
+    append(lines, "NP-douce HC solver result:");
+    append(lines, "HC solver skipped because exact unit propagation already proved the reduced SAT formula impossible.");
+    append(lines);
+    append(lines, `${answerLabel} answer after exact unit simplification: ${noText}`);
+    return { text: "", summary: "", totalTourCost: NaN, hamiltonianFound: false, notComputed: true };
+  }
+
+  append(lines);
+  append(lines, "Classic 3-SAT -> Vertex Cover size:");
+  append(lines, `SAT variables sent to Vertex Cover = ${prepared.stats.variableCount}`);
+  append(lines, `SAT clauses sent to Vertex Cover = ${prepared.stats.clauseCount}`);
+  append(lines, `Vertex Cover vertices = ${prepared.stats.vertexCoverVertices}`);
+  append(lines, `Vertex Cover edges = ${prepared.stats.vertexCoverEdges}`);
+  append(lines, `Vertex Cover target k = ${prepared.stats.vertexCoverTarget}`);
+  append(lines, `estimated HC nodes after Vertex Cover gadget = ${prepared.stats.hcNodes}`);
+
+  if (prepared.skipped) {
+    append(lines);
+    append(lines, "NP-douce HC solver result:");
+    append(lines, `HC solver not run because ${prepared.skipReason}.`);
+    append(lines, "Raise the HC solve node limit if you want to force this reduced HC instance through the solver.");
+    append(lines);
+    append(lines, `${answerLabel} answer inferred from HC: NOT COMPUTED`);
+    return { text: "", summary: "", totalTourCost: NaN, hamiltonianFound: false, notComputed: true };
+  }
+
+  return appendDirectVertexCoverHcReduction(lines, prepared.graph, sourceLabel, answerLabel, yesText, noText);
+}
+
 function runVertexCover(text) {
   const { n, k, padding, edges } = parseVertexCover(text);
-  const sat = vertexCoverTo3Sat(n, k, edges);
-  const prepared = prepareCompressedSatForHc(sat, padding);
+  const graph = buildDirectVertexCoverHcGraph(n, k, edges, padding);
 
   const lines = [];
   append(lines, "Vertex Cover instance:");
   append(lines, `vertices = ${n}`);
   append(lines, `edges = ${edges.length}`);
   append(lines, `k = ${k}`);
-  append(lines, `optional padding directed nodes = ${padding}`);
+  append(lines, `optional padding nodes = ${padding}`);
   append(lines, `edge list = ${edges.map(([u, v]) => `(${u},${v})`).join(" ")}`);
   append(lines);
-  append(lines, "3-SAT encoding:");
-  append(lines, `cardinality encoding = ${sat.encoding}`);
-  append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `variables before simplification = ${sat.variableCount}`);
-  append(lines, `3-SAT clauses before simplification = ${sat.clauses.length}`);
-  appendPreparedHcReduction(lines, prepared, "Vertex Cover compressed HC reduction", "Vertex Cover");
+  append(lines, "Reduction used:");
+  append(lines, "Vertex Cover(G, k) -> direct 12-node edge gadgets -> Hamiltonian Cycle");
+  append(lines, "Gadget crosses: u1-v3, v1-u3, u6-v4, u4-v6.");
+  appendDirectVertexCoverHcReduction(lines, graph, "Vertex Cover direct HC reduction", "Vertex Cover");
   return lines.join("\n");
 }
 
@@ -2491,90 +2787,76 @@ function runClique(text) {
   const { n, k, padding, edges } = parseClique(text);
   const complementEdges = buildComplementEdges(n, edges);
   const vertexCoverK = n - k;
-  const sat = vertexCoverK >= 0 ? vertexCoverTo3Sat(n, vertexCoverK, complementEdges) : null;
-  const prepared = sat ? prepareCompressedSatForHc(sat, padding) : null;
+  const graph = vertexCoverK >= 0 ? buildDirectVertexCoverHcGraph(n, vertexCoverK, complementEdges, padding) : null;
 
   const lines = [];
   append(lines, "Clique instance:");
   append(lines, `vertices = ${n}`);
   append(lines, `edges = ${edges.length}`);
   append(lines, `k = ${k}`);
-  append(lines, `optional padding directed nodes = ${padding}`);
+  append(lines, `optional padding nodes = ${padding}`);
   append(lines, `edge list = ${edges.map(([u, v]) => `(${u},${v})`).join(" ") || "(none)"}`);
   append(lines);
   append(lines, "Reduction used:");
-  append(lines, "Clique(G, k) -> Vertex Cover(complement(G), vertices - k) -> 3-SAT -> compressed Hamiltonian Cycle");
+  append(lines, "Clique(G, k) -> Vertex Cover(complement(G), vertices - k) -> direct 12-node edge gadgets -> Hamiltonian Cycle");
   append(lines, `complement graph edges = ${complementEdges.length}`);
   append(lines, `vertex cover target on complement = ${vertexCoverK}`);
 
-  if (!sat || !prepared) {
+  if (!graph) {
     append(lines);
     append(lines, "Clique answer: NO");
     append(lines, `k = ${k} is larger than the vertex count ${n}`);
     return lines.join("\n");
   }
 
-  append(lines);
-  append(lines, "3-SAT encoding:");
-  append(lines, `cardinality encoding = ${sat.encoding}`);
-  append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `variables before simplification = ${sat.variableCount}`);
-  append(lines, `3-SAT clauses before simplification = ${sat.clauses.length}`);
-  appendPreparedHcReduction(lines, prepared, "Clique compressed HC reduction", "Clique");
+  appendDirectVertexCoverHcReduction(lines, graph, "Clique via direct Vertex Cover HC reduction", "Clique");
   return lines.join("\n");
 }
 
 function runIndependentSet(text) {
   const { n, k, padding, edges } = parseIndependentSet(text);
   const vertexCoverK = n - k;
-  const sat = vertexCoverK >= 0 ? vertexCoverTo3Sat(n, vertexCoverK, edges) : null;
-  const prepared = sat ? prepareCompressedSatForHc(sat, padding) : null;
+  const graph = vertexCoverK >= 0 ? buildDirectVertexCoverHcGraph(n, vertexCoverK, edges, padding) : null;
 
   const lines = [];
   append(lines, "Independent Set instance:");
   append(lines, `vertices = ${n}`);
   append(lines, `edges = ${edges.length}`);
   append(lines, `k = ${k}`);
-  append(lines, `optional padding directed nodes = ${padding}`);
+  append(lines, `optional padding nodes = ${padding}`);
   append(lines, `edge list = ${edges.map(([u, v]) => `(${u},${v})`).join(" ") || "(none)"}`);
   append(lines);
   append(lines, "Reduction used:");
-  append(lines, "Independent Set(G, k) -> Vertex Cover(G, vertices - k) -> 3-SAT -> compressed Hamiltonian Cycle");
+  append(lines, "Independent Set(G, k) -> Vertex Cover(G, vertices - k) -> direct 12-node edge gadgets -> Hamiltonian Cycle");
   append(lines, `vertex cover target = ${vertexCoverK}`);
 
-  if (!sat || !prepared) {
+  if (!graph) {
     append(lines);
     append(lines, "Independent Set answer: NO");
     append(lines, `k = ${k} is larger than the vertex count ${n}`);
     return lines.join("\n");
   }
 
-  append(lines);
-  append(lines, "3-SAT encoding:");
-  append(lines, `cardinality encoding = ${sat.encoding}`);
-  append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `variables before simplification = ${sat.variableCount}`);
-  append(lines, `3-SAT clauses before simplification = ${sat.clauses.length}`);
-  appendPreparedHcReduction(lines, prepared, "Independent Set compressed HC reduction", "Independent Set");
+  appendDirectVertexCoverHcReduction(lines, graph, "Independent Set via direct Vertex Cover HC reduction", "Independent Set");
   return lines.join("\n");
 }
 
 function runSetCover(text) {
   const { universeSize, setCount, k, padding, sets } = parseSetCover(text);
   const sat = setCoverTo3Sat(universeSize, setCount, k, sets);
-  const prepared = prepareCompressedSatForHc(sat, padding);
+  const prepared = prepareSatViaVertexCoverForHc(sat, padding);
 
   const lines = [];
   append(lines, "Set Cover instance:");
   append(lines, `universe elements = ${universeSize}`);
   append(lines, `sets = ${setCount}`);
   append(lines, `k = ${k}`);
-  append(lines, `optional padding directed nodes = ${padding}`);
+  append(lines, `optional padding nodes = ${padding}`);
   append(lines, "sets:");
   sets.forEach((set, index) => append(lines, `S${index + 1} = { ${set.join(", ")} }`));
   append(lines);
   append(lines, "Reduction used:");
-  append(lines, "Set Cover -> 3-SAT coverage clauses plus at-most-k -> compressed Hamiltonian Cycle");
+  append(lines, "Set Cover -> 3-SAT coverage clauses plus at-most-k -> classic Vertex Cover -> direct Hamiltonian Cycle");
   append(lines, `one Boolean variable per set before auxiliary variables = ${setCount}`);
   append(lines);
   append(lines, "3-SAT encoding:");
@@ -2582,14 +2864,14 @@ function runSetCover(text) {
   append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
   append(lines, `variables before simplification = ${sat.variableCount}`);
   append(lines, `3-SAT clauses before simplification = ${sat.clauses.length}`);
-  appendPreparedHcReduction(lines, prepared, "Set Cover compressed HC reduction", "Set Cover");
+  appendSatViaVertexCoverHcReduction(lines, prepared, "Set Cover via 3-SAT -> Vertex Cover -> direct HC", "Set Cover");
   return lines.join("\n");
 }
 
 function runX3c(text) {
   const { universeSize, setCount, padding, sets } = parseX3c(text);
   const sat = x3cTo3Sat(universeSize, setCount, sets);
-  const prepared = prepareCompressedSatForHc(sat, padding);
+  const prepared = prepareSatViaVertexCoverForHc(sat, padding);
   const targetSetCount = universeSize % 3 === 0 ? universeSize / 3 : "not integral";
 
   const lines = [];
@@ -2597,12 +2879,12 @@ function runX3c(text) {
   append(lines, `universe elements = ${universeSize}`);
   append(lines, `3-sets = ${setCount}`);
   append(lines, `target selected sets = ${targetSetCount}`);
-  append(lines, `optional padding directed nodes = ${padding}`);
+  append(lines, `optional padding nodes = ${padding}`);
   append(lines, "sets:");
   sets.forEach((set, index) => append(lines, `S${index + 1} = { ${set.join(", ")} }`));
   append(lines);
   append(lines, "Reduction used:");
-  append(lines, "X3C -> 3-SAT exactly-once coverage clauses -> compressed Hamiltonian Cycle");
+  append(lines, "X3C -> 3-SAT exactly-once coverage clauses -> classic Vertex Cover -> direct Hamiltonian Cycle");
   append(lines, `one Boolean variable per 3-set before auxiliary variables = ${setCount}`);
   append(lines);
   append(lines, "3-SAT encoding:");
@@ -2610,7 +2892,7 @@ function runX3c(text) {
   append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
   append(lines, `variables before simplification = ${sat.variableCount}`);
   append(lines, `3-SAT clauses before simplification = ${sat.clauses.length}`);
-  appendPreparedHcReduction(lines, prepared, "X3C compressed HC reduction", "X3C");
+  appendSatViaVertexCoverHcReduction(lines, prepared, "X3C via 3-SAT -> Vertex Cover -> direct HC", "X3C");
   return lines.join("\n");
 }
 
@@ -2622,7 +2904,7 @@ function graphColorName(index) {
 function runGraphColoring(text) {
   const { n, declaredEdgeCount, colorCount, padding, edges } = parseGraphColoring(text);
   const sat = graphColoringTo3Sat(n, colorCount, edges);
-  const prepared = prepareCompressedSatForHc(sat, padding);
+  const prepared = prepareSatViaVertexCoverForHc(sat, padding);
 
   const lines = [];
   append(lines, "Graph Coloring instance:");
@@ -2630,11 +2912,11 @@ function runGraphColoring(text) {
   append(lines, `declared edges = ${declaredEdgeCount}`);
   append(lines, `unique edges used = ${edges.length}`);
   append(lines, `colors requested = ${colorCount}`);
-  append(lines, `optional padding directed nodes = ${padding}`);
+  append(lines, `optional padding nodes = ${padding}`);
   append(lines, `edge list = ${edges.map(([u, v]) => `(${u},${v})`).join(" ") || "(none)"}`);
   append(lines);
   append(lines, "Reduction used:");
-  append(lines, "Graph Coloring -> 3-SAT color clauses -> compressed Hamiltonian Cycle");
+  append(lines, "Graph Coloring -> 3-SAT color clauses -> classic Vertex Cover -> direct Hamiltonian Cycle");
   append(lines, `${colorCount} Boolean color variables per vertex`);
   append(lines);
   append(lines, "3-SAT encoding:");
@@ -2642,7 +2924,7 @@ function runGraphColoring(text) {
   append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
   append(lines, `variables before simplification = ${sat.variableCount}`);
   append(lines, `3-SAT clauses before simplification = ${sat.clauses.length}`);
-  appendPreparedHcReduction(lines, prepared, "Graph Coloring compressed HC reduction", "Graph Coloring");
+  appendSatViaVertexCoverHcReduction(lines, prepared, "Graph Coloring via 3-SAT -> Vertex Cover -> direct HC", "Graph Coloring");
   return lines.join("\n");
 }
 
@@ -2650,11 +2932,11 @@ function runSudoku() {
   const puzzle = readSudokuPuzzle();
   const compactMode = puzzle.n <= 16;
   const sat = compactMode ? sudokuTo3Sat(puzzle) : summarizeLargeSudokuReduction(puzzle);
-  const prepared = compactMode ? prepareCompressedSatForHc(sat, 0) : null;
-  const stats = compactMode && !prepared.simplified.contradiction
-    ? estimateCompressedReductionGraph(prepared.simplified.variableCount, prepared.simplified.clauses, 0)
-    : sat.stats;
   const denseLimit = Math.max(0, Math.floor(readNonnegativeNumber("sudokuHcLimit", "Dense HC calculation node limit")));
+  const prepared = compactMode ? prepareSatViaVertexCoverForHc(sat, 0, denseLimit) : null;
+  const stats = compactMode && !prepared.simplified.contradiction
+    ? prepared.stats
+    : estimateSatToVertexCoverReduction(sat.variableCount, sat.clauseCount || 0, 0);
   let hc = null;
   let solution = null;
   const lines = [];
@@ -2668,7 +2950,7 @@ function runSudoku() {
   append(lines, formatSudokuGrid(puzzle.grid, puzzle.symbols));
   append(lines);
   append(lines, "Exact Sudoku reduction:");
-  append(lines, "Sudoku -> exact cover style 3-SAT -> compressed Hamiltonian Cycle");
+  append(lines, "Sudoku -> exact cover style 3-SAT -> classic Vertex Cover -> direct Hamiltonian Cycle");
   append(lines, `base placement variables = ${sat.baseVariableCount}`);
   append(lines, `SAT variables before simplification = ${sat.variableCount}`);
   append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
@@ -2687,27 +2969,17 @@ function runSudoku() {
     append(lines, "HC solver skipped because exact unit propagation already proved the Sudoku constraints impossible.");
     append(lines, "Sudoku answer inferred from HC: NO SOLUTION");
   } else {
-    append(lines, "Compressed HC reduction size:");
-    append(lines, `base directed nodes = ${stats.baseDirected}`);
-    append(lines, `total directed nodes = ${stats.directedCount}`);
-    append(lines, `undirected HC nodes = ${stats.n}`);
-    append(lines, `directed arcs = ${stats.arcCount}`);
-    append(lines);
-    append(lines, "Degree-2 forced-edge precheck:");
-    if (compactMode) {
-      append(lines, `vertices with exactly two HC edges = ${stats.forcedVertexCount}`);
-      append(lines, `forced HC edges = ${stats.forcedEdgeCount}`);
-      append(lines, `forced edge total = ${formatNumber(stats.forcedEdgeTotal)}`);
-    } else {
-      append(lines, "not materialized for 25x25 mode, because building every HC edge would be too much memory for a browser or phone");
-    }
+    append(lines, "Classic 3-SAT -> Vertex Cover size:");
+    append(lines, `SAT variables sent to Vertex Cover = ${stats.variableCount}`);
+    append(lines, `SAT clauses sent to Vertex Cover = ${stats.clauseCount}`);
+    append(lines, `Vertex Cover vertices = ${stats.vertexCoverVertices}`);
+    append(lines, `Vertex Cover edges = ${stats.vertexCoverEdges}`);
+    append(lines, `Vertex Cover target k = ${stats.vertexCoverTarget}`);
+    append(lines, `estimated HC nodes after Vertex Cover gadget = ${stats.hcNodes}`);
   }
   append(lines);
-  if (compactMode && !prepared.simplified.contradiction && stats.n <= denseLimit) {
-    hc = runCompressedHcDecision(prepared.graph, "Sudoku compressed HC reduction");
-    append(lines, hc.summary);
-    append(lines);
-    append(lines, inferredAnswerLine(hc, "Sudoku", "SOLUTION EXISTS", "NO SOLUTION"));
+  if (compactMode && !prepared.simplified.contradiction && !prepared.skipped) {
+    hc = appendDirectVertexCoverHcReduction(lines, prepared.graph, "Sudoku via 3-SAT -> Vertex Cover -> direct HC", "Sudoku", "SOLUTION EXISTS", "NO SOLUTION");
     if (hc.hamiltonianFound) {
       solution = solveSudokuPuzzle(puzzle);
       if (solution) {
@@ -2719,7 +2991,7 @@ function runSudoku() {
     }
   } else if (!compactMode || !prepared.simplified.contradiction) {
     append(lines, "NP-douce HC solver result:");
-    append(lines, `HC solver not run because ${stats.n} nodes is above the safety limit ${denseLimit}${compactMode ? "" : " or the Sudoku is in 25x25 large mode"}.`);
+    append(lines, `HC solver not run because ${stats.hcNodes} nodes is above the safety limit ${denseLimit}${compactMode ? "" : " or the Sudoku is in 25x25 large mode"}.`);
     append(lines, "Sudoku answer inferred from HC: NOT COMPUTED");
   }
   return lines.join("\n");
@@ -3136,7 +3408,7 @@ function runPacking3d() {
   const packed = packBoxesExtremePoint(input);
   drawPackingScene(input.truck, packed.placed);
   const reduction = buildPackingCandidateReduction(input, packed);
-  const prepared = prepareCompressedSatForHc(reduction, 0);
+  const prepared = prepareSatViaVertexCoverForHc(reduction, 0);
   const truckVolume = input.truck.l * input.truck.w * input.truck.h;
   const totalBoxVolume = packed.items.reduce((sum, item) => sum + item.volume, 0);
   const totalBoxWeight = packed.items.reduce((sum, item) => sum + item.weight, 0);
@@ -3173,6 +3445,7 @@ function runPacking3d() {
   append(lines);
   append(lines, "Candidate-placement reduction:");
   append(lines, "Each candidate means one exact box orientation at one generated position. Clauses choose one placement per box and reject overlaps.");
+  append(lines, "Candidate 3-SAT -> classic Vertex Cover -> direct Hamiltonian Cycle.");
   append(lines, `max packing options sent to HC = ${input.candidateBudget}`);
   append(lines, `generated candidates = ${reduction.generatedCandidates}`);
   append(lines, `kept candidates = ${reduction.keptCandidates}${reduction.pruned ? " (pruned for low nodes)" : ""}`);
@@ -3180,7 +3453,7 @@ function runPacking3d() {
   append(lines, `CNF clauses before 3-literal normalization = ${reduction.rawClauseCount}`);
   append(lines, `3-SAT clauses before simplification = ${reduction.clauses.length}`);
   if (reduction.impossibleReasons.length) append(lines, `necessary impossibility check = ${reduction.impossibleReasons.join("; ")}`);
-  appendPreparedHcReduction(lines, prepared, "3D packing candidate-placement compressed HC reduction", "Packing candidate model");
+  appendSatViaVertexCoverHcReduction(lines, prepared, "3D packing via 3-SAT -> Vertex Cover -> direct HC", "Packing candidate model");
   append(lines, "The manifest above is a visual/practical placement guide; the YES/NO line comes from the HC solver.");
   append(lines, "Higher max packing options send more possibilities into HC, creating more nodes and slower runs.");
   return lines.join("\n");
@@ -3364,294 +3637,20 @@ function appendSatSimplificationSummary(lines, simplified) {
   if (simplified.contradiction) append(lines, `contradiction = ${simplified.contradictionReason}`);
 }
 
-function prepareCompressedSatForHc(sat, padding) {
-  const simplified = simplify3SatForHc(sat.variableCount, sat.clauses);
-  if (simplified.contradiction) {
-    return { simplified, graph: null, forced: null };
-  }
-  const graph = buildCompressedReductionGraph(simplified.variableCount, simplified.clauses, padding);
-  const forced = findDegreeTwoForcedEdges(graph.edge, graph.n);
-  return { simplified, graph, forced };
-}
-
-function appendPreparedHcReduction(lines, prepared, sourceLabel, answerLabel, yesText = "YES", noText = "NO") {
-  append(lines);
-  appendSatSimplificationSummary(lines, prepared.simplified);
-  if (prepared.simplified.contradiction) {
-    append(lines);
-    append(lines, "NP-douce HC solver result:");
-    append(lines, "HC solver skipped because exact unit propagation already proved the reduced SAT formula impossible.");
-    append(lines);
-    append(lines, `${answerLabel} answer after exact unit simplification: ${noText}`);
-    return { text: "", summary: "", totalTourCost: NaN, hamiltonianFound: false, notComputed: true };
-  }
-
-  append(lines);
-  append(lines, "Compressed HC reduction size:");
-  append(lines, `base directed nodes = ${prepared.graph.baseDirected}`);
-  append(lines, `total directed nodes = ${prepared.graph.directedCount}`);
-  append(lines, `undirected HC nodes = ${prepared.graph.n}`);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
-  append(lines, `vertices with exactly two HC edges = ${prepared.forced.forcedVertexCount}`);
-  append(lines, `forced HC edges = ${prepared.forced.forcedEdgeCount}`);
-  append(lines, `forced edge total = ${formatNumber(prepared.forced.forcedEdgeTotal)}`);
-  append(lines);
-  const hc = runCompressedHcDecision(prepared.graph, sourceLabel);
-  append(lines, hc.summary);
-  append(lines);
-  append(lines, inferredAnswerLine(hc, answerLabel, yesText, noText));
-  return hc;
-}
-
 function run3SatCompressed(text) {
   const { variableCount, clauseCount, padding, clauses } = parse3Sat(text);
-  const prepared = prepareCompressedSatForHc({ variableCount, clauses }, padding);
-  const { simplified, graph, forced } = prepared;
+  const prepared = prepareSatViaVertexCoverForHc({ variableCount, clauses }, padding);
   const lines = [];
   append(lines, "3-SAT instance:");
   append(lines, `variables = ${variableCount}`);
   append(lines, `clauses = ${clauseCount}`);
+  append(lines, `optional padding nodes = ${padding}`);
   append(lines, `Formula: ${formatFormula(clauses)}`);
   append(lines);
-  appendSatSimplificationSummary(lines, simplified);
-  if (simplified.contradiction) {
-    append(lines);
-    append(lines, "NP-douce HC solver result:");
-    append(lines, "HC solver skipped because exact unit propagation already proved the formula impossible.");
-    append(lines);
-    append(lines, "Original 3-SAT answer after exact unit simplification: UNSATISFIABLE");
-    return lines.join("\n");
-  }
-  append(lines);
-  append(lines, "Compressed polynomial reduction size:");
-  append(lines, `base directed nodes = ${graph.baseDirected}`);
-  append(lines, `padding directed nodes = ${padding}`);
-  append(lines, `total directed nodes = ${graph.directedCount}`);
-  append(lines, `undirected HC nodes = ${graph.n}`);
-
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
-  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
-  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
-  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
-
-  append(lines);
-  const hc = runCompressedHcDecision(graph, "3-SAT compressed HC reduction");
-  append(lines, hc.summary);
-  append(lines);
-  append(lines, inferredAnswerLine(hc, "Original 3-SAT", "SATISFIABLE", "UNSATISFIABLE"));
+  append(lines, "Reduction used:");
+  append(lines, "3-SAT -> classic Vertex Cover clause triangles -> direct Hamiltonian Cycle");
+  appendSatViaVertexCoverHcReduction(lines, prepared, "3-SAT via classic Vertex Cover HC reduction", "Original 3-SAT", "SATISFIABLE", "UNSATISFIABLE");
   return lines.join("\n");
-}
-
-function estimateCompressedReductionGraph(variableCount, clauses, padding) {
-  const clauseCount = clauses.length;
-  const occurrences = Array.from({ length: variableCount }, () => []);
-  for (let clauseIndex = 0; clauseIndex < clauseCount; clauseIndex++) {
-    for (const literal of clauses[clauseIndex]) {
-      occurrences[Math.abs(literal) - 1].push({ clauseIndex, literal });
-    }
-  }
-
-  const variableStart = Array(variableCount + 1).fill(0);
-  const variableSlotCount = Array(variableCount).fill(0);
-  let nextNode = 1;
-  for (let variable = 0; variable < variableCount; variable++) {
-    variableStart[variable] = nextNode;
-    variableSlotCount[variable] = Math.max(2, occurrences[variable].length + 1);
-    nextNode += variableSlotCount[variable];
-  }
-  variableStart[variableCount] = nextNode;
-  nextNode += clauseCount;
-
-  const source = nextNode;
-  const target = nextNode + 1;
-  const baseDirected = nextNode + 1;
-  const directedCount = baseDirected + padding;
-  const indegree = Array(directedCount + 1).fill(0);
-  const outdegree = Array(directedCount + 1).fill(0);
-  const arcs = [];
-  const addArc = (from, to) => {
-    outdegree[from] += 1;
-    indegree[to] += 1;
-    arcs.push([from, to]);
-  };
-  const slotNode = (variableIndex, slotIndex) => variableStart[variableIndex] + slotIndex;
-  const clauseNode = clauseIndex => variableStart[variableCount] + clauseIndex;
-
-  addArc(source, slotNode(0, 0));
-  addArc(source, slotNode(0, variableSlotCount[0] - 1));
-
-  for (let variable = 0; variable < variableCount; variable++) {
-    for (let slot = 1; slot < variableSlotCount[variable]; slot++) {
-      addArc(slotNode(variable, slot - 1), slotNode(variable, slot));
-      addArc(slotNode(variable, slot), slotNode(variable, slot - 1));
-    }
-
-    if (variable + 1 < variableCount) {
-      const leftEnd = slotNode(variable, 0);
-      const rightEnd = slotNode(variable, variableSlotCount[variable] - 1);
-      const nextLeft = slotNode(variable + 1, 0);
-      const nextRight = slotNode(variable + 1, variableSlotCount[variable + 1] - 1);
-      addArc(leftEnd, nextLeft);
-      addArc(leftEnd, nextRight);
-      addArc(rightEnd, nextLeft);
-      addArc(rightEnd, nextRight);
-    } else {
-      addArc(slotNode(variable, 0), target);
-      addArc(slotNode(variable, variableSlotCount[variable] - 1), target);
-    }
-  }
-
-  for (let variable = 0; variable < variableCount; variable++) {
-    for (let occurrenceIndex = 0; occurrenceIndex < occurrences[variable].length; occurrenceIndex++) {
-      const occurrence = occurrences[variable][occurrenceIndex];
-      const before = slotNode(variable, occurrenceIndex);
-      const after = slotNode(variable, occurrenceIndex + 1);
-      const clauseVertex = clauseNode(occurrence.clauseIndex);
-      if (occurrence.literal > 0) {
-        addArc(before, clauseVertex);
-        addArc(clauseVertex, after);
-      } else {
-        addArc(after, clauseVertex);
-        addArc(clauseVertex, before);
-      }
-    }
-  }
-
-  if (padding === 0) {
-    addArc(target, source);
-  } else {
-    const firstPadding = baseDirected + 1;
-    addArc(target, firstPadding);
-    for (let vertex = firstPadding; vertex < directedCount; vertex++) addArc(vertex, vertex + 1);
-    addArc(directedCount, source);
-  }
-
-  let forcedVertexCount = directedCount;
-  const inGadgetDegree = Array(directedCount + 1).fill(0);
-  const outGadgetDegree = Array(directedCount + 1).fill(0);
-  for (let vertex = 1; vertex <= directedCount; vertex++) {
-    inGadgetDegree[vertex] = 1 + indegree[vertex];
-    outGadgetDegree[vertex] = 1 + outdegree[vertex];
-    if (inGadgetDegree[vertex] === 2) forcedVertexCount += 1;
-    if (outGadgetDegree[vertex] === 2) forcedVertexCount += 1;
-  }
-  let forcedArcEdges = 0;
-  for (const [from, to] of arcs) {
-    if (outGadgetDegree[from] === 2 || inGadgetDegree[to] === 2) forcedArcEdges += 1;
-  }
-  const forcedEdgeCount = (2 * directedCount) + forcedArcEdges;
-  return {
-    n: 3 * directedCount,
-    baseDirected,
-    directedCount,
-    arcCount: arcs.length,
-    forcedVertexCount,
-    forcedEdgeCount,
-    forcedEdgeTotal: -forcedEdgeCount
-  };
-}
-
-function buildCompressedReductionGraph(variableCount, clauses, padding) {
-  const clauseCount = clauses.length;
-  const occurrences = Array.from({ length: variableCount }, () => []);
-  for (let clauseIndex = 0; clauseIndex < clauseCount; clauseIndex++) {
-    for (const literal of clauses[clauseIndex]) {
-      occurrences[Math.abs(literal) - 1].push({ clauseIndex, literal });
-    }
-  }
-
-  const variableStart = Array(variableCount + 1).fill(0);
-  const variableSlotCount = Array(variableCount).fill(0);
-  let nextNode = 1;
-  for (let variable = 0; variable < variableCount; variable++) {
-    variableStart[variable] = nextNode;
-    variableSlotCount[variable] = Math.max(2, occurrences[variable].length + 1);
-    nextNode += variableSlotCount[variable];
-  }
-  variableStart[variableCount] = nextNode;
-  nextNode += clauseCount;
-
-  const source = nextNode;
-  const target = nextNode + 1;
-  const baseDirected = nextNode + 1;
-  const directedCount = baseDirected + padding;
-  const arcs = Array.from({ length: directedCount + 1 }, () => []);
-  const addArc = (from, to) => {
-    arcs[from].push(to);
-  };
-  const slotNode = (variableIndex, slotIndex) => variableStart[variableIndex] + slotIndex;
-  const clauseNode = clauseIndex => variableStart[variableCount] + clauseIndex;
-
-  addArc(source, slotNode(0, 0), "decision");
-  addArc(source, slotNode(0, variableSlotCount[0] - 1), "decision");
-
-  for (let variable = 0; variable < variableCount; variable++) {
-    for (let slot = 1; slot < variableSlotCount[variable]; slot++) {
-      addArc(slotNode(variable, slot - 1), slotNode(variable, slot), "structural");
-      addArc(slotNode(variable, slot), slotNode(variable, slot - 1), "structural");
-    }
-
-    if (variable + 1 < variableCount) {
-      const leftEnd = slotNode(variable, 0);
-      const rightEnd = slotNode(variable, variableSlotCount[variable] - 1);
-      const nextLeft = slotNode(variable + 1, 0);
-      const nextRight = slotNode(variable + 1, variableSlotCount[variable + 1] - 1);
-      addArc(leftEnd, nextLeft, "decision");
-      addArc(leftEnd, nextRight, "decision");
-      addArc(rightEnd, nextLeft, "decision");
-      addArc(rightEnd, nextRight, "decision");
-    } else {
-      addArc(slotNode(variable, 0), target, "structural");
-      addArc(slotNode(variable, variableSlotCount[variable] - 1), target, "structural");
-    }
-  }
-
-  for (let variable = 0; variable < variableCount; variable++) {
-    for (let occurrenceIndex = 0; occurrenceIndex < occurrences[variable].length; occurrenceIndex++) {
-      const occurrence = occurrences[variable][occurrenceIndex];
-      const before = slotNode(variable, occurrenceIndex);
-      const after = slotNode(variable, occurrenceIndex + 1);
-      const clauseVertex = clauseNode(occurrence.clauseIndex);
-      if (occurrence.literal > 0) {
-        addArc(before, clauseVertex, "decision");
-        addArc(clauseVertex, after, "decision");
-      } else {
-        addArc(after, clauseVertex, "decision");
-        addArc(clauseVertex, before, "decision");
-      }
-    }
-  }
-
-  if (padding === 0) {
-    addArc(target, source, "structural");
-  } else {
-    const firstPadding = baseDirected + 1;
-    addArc(target, firstPadding, "structural");
-    for (let vertex = firstPadding; vertex < directedCount; vertex++) addArc(vertex, vertex + 1, "structural");
-    addArc(directedCount, source, "structural");
-  }
-
-  const n = 3 * directedCount;
-  const edge = makeMatrix(n);
-  const allowedEdgeKeys = new Set();
-  const gadgetIn = vertex => (3 * vertex) - 2;
-  const gadgetMid = vertex => (3 * vertex) - 1;
-  const gadgetOut = vertex => 3 * vertex;
-  const addUndirected = (from, to) => {
-    edge[from][to] = -1;
-    edge[to][from] = -1;
-    allowedEdgeKeys.add(edgeKey(from, to));
-  };
-  for (let vertex = 1; vertex <= directedCount; vertex++) {
-    addUndirected(gadgetIn(vertex), gadgetMid(vertex));
-    addUndirected(gadgetMid(vertex), gadgetOut(vertex));
-  }
-  for (let from = 1; from <= directedCount; from++) {
-    for (const to of arcs[from]) addUndirected(gadgetOut(from), gadgetIn(to));
-  }
-  return { edge, n, baseDirected, directedCount, allowedEdgeKeys };
 }
 
 function findDegreeTwoForcedEdges(edge, n) {
