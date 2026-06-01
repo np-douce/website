@@ -24,7 +24,7 @@ The app is static: it uses only local HTML, CSS, and JavaScript. No server is re
 
 The Hamiltonian/TSP theory calculations are ported from the C++ formulas using JavaScript `Number`, which is IEEE-754 double precision like C++ `double`.
 
-Large Hamiltonian graphs can still be expensive because the original theory includes nested pair/edge calculations. Matrix, points, manual, and pair inputs do not have a fixed app maximum; their practical size depends on the input and the device running the browser.
+Large Hamiltonian graphs can still be expensive because the original theory includes nested pair/edge calculations. Matrix, points, manual, and pair inputs do not have a fixed app maximum; their p[...]
 
 Reduction tabs now use this strict flow for their displayed answer:
 
@@ -32,19 +32,19 @@ Reduction tabs now use this strict flow for their displayed answer:
 original problem -> reduction -> compressed HC graph -> NP-douce HC solver -> inferred original answer
 ```
 
-If the compressed HC graph is above the app's `HC solve node limit`, the tab reports `NOT COMPUTED` instead of using a separate direct solver. Raise the limit when you want to force a larger reduced HC instance through the solver, but large values can run very slowly.
+If the compressed HC graph is above the app's `HC solve node limit`, the tab reports `NOT COMPUTED` instead of using a separate direct solver. Raise the limit when you want to force a larger reduc[...]
 
-Compressed reductions now run the HC solver over the full set of real allowed HC edges from the start. They still skip zero-weight non-edges, because those cannot contribute to the target `-n` Hamiltonian tour.
+Compressed reductions now run the HC solver over the full set of real allowed HC edges from the start. They still skip zero-weight non-edges, because those cannot contribute to the target `-n` Ham[...]
 
-`HC beta multiplier` controls the beta temperature used by the reduction solver. The app computes its suggested beta from the graph variance, then multiplies it by this value, so `0.25` means one-quarter of the suggested beta.
+`HC beta multiplier` controls the beta temperature used by the reduction solver. The app computes its suggested beta from the graph variance, then multiplies it by this value, so `0.25` means one-[...]
 
 `adaptive beta` changes beta during the HC solve. When it is on, each choice step recomputes the current conditioned standard deviation and uses `beta multiplier / current standard deviation`.
 
-`HC backtrack tries` lets the HC solver revisit close decisions. The score formula ranks every valid edge, the greedy edge is tried first, and alternate branches are kept when their score is close to the best edge. Higher values can improve accuracy but may run much slower.
+`HC backtrack tries` lets the HC solver revisit close decisions. The score formula ranks every valid edge, the greedy edge is tried first, and alternate branches are kept when their score is close[...]
 
-Candidate edges are normalized with the state function omega. For each valid edge, the app uses the count term `N(e) = 2^(CE - 1) * (n - 1 - VCE + CE)!`, computes `L(e) = ln(N(e)) - beta * mean + 0.5 * beta^2 * variance`, shifts by `M = max L`, then uses `P(e) = exp(L(e) - M) / omega` with `omega = sum exp(L(f) - M)`.
+Candidate edges are normalized with the state function omega. For each valid edge, the app uses the count term `N(e) = 2^(CE - 1) * (n - 1 - VCE + CE)!`, computes `L(e) = ln(N(e)) - beta * mean + [...]
 
-`HC repair passes` runs local repair after the math-selected tour. The repair keeps the original HC math as the first pass, fills unfinished reduction tours with neutral zero placeholders, then accepts only 2-opt or targeted 3-opt swaps that lower the final tour cost toward the Hamiltonian target.
+`HC repair passes` runs local repair after the math-selected tour. The repair keeps the original HC math as the first pass, fills unfinished reduction tours with neutral zero placeholders, then ac[...]
 
 ## 3-SAT input format
 
@@ -87,7 +87,7 @@ Each following line is one undirected edge:
 2 3
 ```
 
-The app reduces the instance to 3-SAT, builds the compressed Hamiltonian-cycle graph, runs the NP-douce HC solver when under the node limit, and infers whether a vertex cover of size at most `k` exists from the HC result.
+The app reduces the instance to 3-SAT, builds the compressed Hamiltonian-cycle graph, runs the NP-douce HC solver when under the node limit, and infers whether a vertex cover of size at most `k` e[...]
 
 The at-most-`k` part uses a sequential counter encoding, so it grows closer to `O(vertices * k)` instead of enumerating every `k + 1` subset.
 
@@ -159,7 +159,7 @@ Example:
 4 5
 ```
 
-This example has an independent set `{1, 3, 5}`. Because this route goes directly to Vertex Cover on the same graph, it avoids an extra complement graph step before the Hamiltonian-cycle calculation.
+This example has an independent set `{1, 3, 5}`. Because this route goes directly to Vertex Cover on the same graph, it avoids an extra complement graph step before the Hamiltonian-cycle calculat[...]
 
 ## Set Cover input format
 
@@ -229,7 +229,7 @@ Example:
 2 3 6
 ```
 
-This example has an exact cover `{S1, S2}`. The 3-SAT encoding uses one Boolean variable per 3-set, one at-least-one coverage clause for each universe element, and pairwise not-both clauses for every pair of sets that share an element.
+This example has an exact cover `{S1, S2}`. The 3-SAT encoding uses one Boolean variable per 3-set, one at-least-one coverage clause for each universe element, and pairwise not-both clauses for e[...]
 
 ## Graph Coloring input format
 
@@ -276,7 +276,7 @@ Example 4-colorable instance:
 3 4
 ```
 
-That second graph is `K4`: it is not 3-colorable, but it is 4-colorable. The 3-SAT encoding uses `colors * vertices` base variables, one at-least-one-color clause per vertex, pairwise not-both color clauses per vertex, and one conflict clause per edge per color before 3-literal normalization.
+That second graph is `K4`: it is not 3-colorable, but it is 4-colorable. The 3-SAT encoding uses `colors * vertices` base variables, one at-least-one-color clause per vertex, pairwise not-both co[...]
 
 ## Sudoku tool
 
@@ -309,7 +309,7 @@ each box has each digit once
 Sudoku -> exact cover style 3-SAT -> compressed Hamiltonian Cycle
 ```
 
-For 4x4, 9x9, and 16x16, the exact reduction size and degree-2 forced-edge precheck are posted. For 25x25, the app counts the exact 3-SAT and compressed-HC size without materializing every clause and edge, because the full graph is too large for browser memory. Sudoku only displays a filled visual witness after the HC solver returns YES for a materialized reduced graph.
+For 4x4, 9x9, and 16x16, the exact reduction size and degree-2 forced-edge precheck are posted. For 25x25, the app counts the exact 3-SAT and compressed-HC size without materializing every clause[...]
 
 ## 3D Packing tool
 
@@ -337,4 +337,4 @@ overlapping candidates cannot both be chosen
 candidate-placement 3-SAT -> compressed Hamiltonian Cycle
 ```
 
-The Hamiltonian-cycle side uses the same compressed reduction and degree-2 forced-edge precheck as the other NP-complete tools. Raise max packing options sent to HC when you want broader HC search space; lower it when you want fewer nodes and faster runs.
+The Hamiltonian-cycle side uses the same compressed reduction and degree-2 forced-edge precheck as the other NP-complete tools. Raise max packing options sent to HC when you want broader HC searc[...]
