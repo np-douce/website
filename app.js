@@ -1119,18 +1119,19 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
   const lines = [];
   const edgeSquared = buildSquaredEdgeMatrix(edge, n);
   const moments = computeTheoryMoments(edge, edgeSquared, n);
-  const effectiveBeta = Number.isFinite(beta) ? beta : (1.0 / Math.sqrt(Math.max(Number.MIN_VALUE, moments.tourVariance)));
-  const adaptiveBeta = Boolean(options.adaptiveBeta);
-  const betaMultiplier = Number.isFinite(options.betaMultiplier) ? options.betaMultiplier : effectiveBeta;
-  const scoreMethod = options.scoreMethod === "importance" ? "importance" : "omega";
+  const suggestedBeta = 1.0 / Math.sqrt(Math.max(Number.MIN_VALUE, moments.tourVariance));
+  const effectiveBeta = Number.isFinite(beta) ? beta : suggestedBeta;
+  const adaptiveBeta = options.adaptiveBeta !== false;
+  const betaMultiplier = Number.isFinite(options.betaMultiplier) ? options.betaMultiplier : 1;
+  const scoreMethod = "importance";
   append(lines, `Source: ${sourceLabel}`);
   append(lines, `n = ${n}`);
   append(lines, `the average  = ${formatNumber(moments.meanTourLength)}`);
   append(lines, `S_self ${formatNumber(moments.selfInteractionSum)} S_neighbor ${formatNumber(moments.neighborInteractionSum)} S_non_neighbor ${formatNumber(moments.disjointInteractionSum)}`);
   append(lines, `the standard deviation = ${formatNumber(moments.tourVariance)} ${formatNumber(Math.sqrt(Math.max(0, moments.tourVariance)))}`);
-  append(lines, `suggested beta value = ${formatNumber(1.0 / Math.sqrt(Math.max(Number.MIN_VALUE, moments.tourVariance)))}`);
-  append(lines, `adaptive beta = ${adaptiveBeta ? "on" : "off"}`);
-  append(lines, `score method = ${scoreMethod === "importance" ? "importance lnZ(force edge) - lnZ(forbid edge)" : "omega lnZ(force edge)"}`);
+  append(lines, `suggested beta value = ${formatNumber(suggestedBeta)}`);
+  append(lines, `adaptive beta = ${adaptiveBeta ? "on (automatic)" : "off"}`);
+  append(lines, "score method = importance lnZ(force edge) - lnZ(forbid edge) (automatic)");
   const entropy = lnGamma(n) - Math.log(2.0);
   const partition = entropy - (effectiveBeta * moments.meanTourLength) + ((effectiveBeta * effectiveBeta) * 0.5 * moments.tourVariance);
   append(lines, `entropy ${formatNumber(entropy)} partition ${formatNumber(partition)}`);
@@ -1239,22 +1240,15 @@ function getHcSolveNodeLimit() {
 }
 
 function getHcBetaMultiplier() {
-  const input = document.getElementById("hcBetaMultiplier");
-  if (!input) return 1;
-  const value = Number(input.value);
-  if (!Number.isFinite(value) || value <= 0) throw new Error("HC beta multiplier must be greater than 0.");
-  return value;
+  return 1;
 }
 
 function getHcScoreMethod() {
-  const input = document.getElementById("hcScoreMethod");
-  if (!input) return "importance";
-  return input.value === "omega" ? "omega" : "importance";
+  return "importance";
 }
 
 function getHcAdaptiveBeta() {
-  const input = document.getElementById("hcAdaptiveBeta");
-  return input ? input.checked : false;
+  return true;
 }
 
 function getHcRepairPasses() {
@@ -1266,11 +1260,7 @@ function getHcRepairPasses() {
 }
 
 function getHcBacktrackTries() {
-  const input = document.getElementById("hcBacktrackTries");
-  if (!input) return 0;
-  const value = Number(input.value);
-  if (!Number.isFinite(value) || value < 0) throw new Error("HC backtrack tries must be a nonnegative number.");
-  return Math.floor(value);
+  return 0;
 }
 
 function runCompressedHcDecision(graph, sourceLabel) {
@@ -1285,25 +1275,22 @@ function runCompressedHcDecision(graph, sourceLabel) {
   const baseEdgeSquared = buildSquaredEdgeMatrix(graph.edge, graph.n);
   const baseMoments = computeTheoryMoments(graph.edge, baseEdgeSquared, graph.n);
   const suggestedBeta = 1.0 / Math.sqrt(Math.max(Number.MIN_VALUE, baseMoments.tourVariance));
-  const multiplier = getHcBetaMultiplier();
-  const beta = suggestedBeta * multiplier;
-  const result = solveTrackingSolver(graph.edge, graph.n, beta, `${sourceLabel} beta x${formatNumber(multiplier)}`, {
+  const beta = suggestedBeta;
+  const result = solveTrackingSolver(graph.edge, graph.n, beta, sourceLabel, {
     forceDegreeTwo: true,
     allowedEdgeKeys: graph.allowedEdgeKeys || null,
     repairPasses: getHcRepairPasses(),
-    backtrackLimit: getHcBacktrackTries(),
+    backtrackLimit: 0,
     completeWithNeutralEdges: true,
-    adaptiveBeta: getHcAdaptiveBeta(),
-    betaMultiplier: multiplier,
-    scoreMethod: getHcScoreMethod()
+    adaptiveBeta: true,
+    betaMultiplier: 1,
+    scoreMethod: "importance"
   });
   const lines = [];
   append(lines, "NP-douce HC solver result:");
   if (graph.allowedEdgeKeys) append(lines, `allowed HC edges scored = ${graph.allowedEdgeKeys.size}`);
-  append(lines, `HC beta multiplier = x${formatNumber(multiplier)}`);
-  append(lines, `HC score method = ${getHcScoreMethod()}`);
-  append(lines, `HC adaptive beta = ${getHcAdaptiveBeta() ? "on" : "off"}`);
-  append(lines, `HC backtrack tries = ${getHcBacktrackTries()}`);
+  append(lines, "HC score method = importance (automatic)");
+  append(lines, "HC adaptive beta = on (automatic)");
   append(lines, `starting HC beta value = ${formatNumber(beta)}`);
   if (Number.isFinite(result.totalTourCost)) {
     append(lines, `HC tour cost = ${formatNumber(result.totalTourCost)}`);
@@ -1743,6 +1730,197 @@ function buildYesTriangleGraph() {
     selectorSlots: 0,
     paddingNodes: 0,
     directYes: true
+  };
+}
+
+function buildNoPathGraph() {
+  const edge = makeMatrix(3);
+  const allowedEdgeKeys = new Set();
+  const add = (from, to) => {
+    edge[from][to] = -1;
+    edge[to][from] = -1;
+    allowedEdgeKeys.add(edgeKey(from, to));
+  };
+  add(1, 2);
+  add(2, 3);
+  return {
+    edge,
+    n: 3,
+    allowedEdgeKeys,
+    gadgetCount: 0,
+    selectorSlots: 0,
+    paddingNodes: 0,
+    directNo: true
+  };
+}
+
+function estimateDirectVertexCoverHcNodes(vertexCount, coverLimit, edgeCount, padding = 0) {
+  if (edgeCount === 0) return 3;
+  return (12 * edgeCount) + (2 * Math.min(Math.max(0, coverLimit), vertexCount)) + Math.max(0, padding);
+}
+
+function simplifyVertexCoverInstance(vertexCount, coverLimit, edges) {
+  let remainingEdges = normalizeUndirectedEdges(vertexCount, edges);
+  let remainingK = coverLimit;
+  const forcedVertices = [];
+  const forcedSet = new Set();
+  let highDegreeForces = 0;
+  let leafNeighborForces = 0;
+  let trivialAllRemaining = false;
+  let impossible = remainingK < 0;
+  let impossibleReason = impossible ? "vertex cover target k is negative" : "";
+  let passes = 0;
+
+  const forceVertex = (vertex, reason) => {
+    if (forcedSet.has(vertex)) return true;
+    forcedSet.add(vertex);
+    forcedVertices.push({ vertex, reason });
+    if (reason === "not choosing this vertex would require too many neighbors") highDegreeForces += 1;
+    if (reason === "leaf-neighbor rule") leafNeighborForces += 1;
+    remainingK -= 1;
+    if (remainingK < 0) {
+      impossible = true;
+      impossibleReason = `forced more cover vertices than k allows after choosing vertex ${vertex}`;
+      return false;
+    }
+    remainingEdges = remainingEdges.filter(([u, v]) => u !== vertex && v !== vertex);
+    return true;
+  };
+
+  while (!impossible && remainingEdges.length > 0) {
+    passes += 1;
+    if (passes > (vertexCount + edges.length + 5)) {
+      throw new Error("Vertex Cover simplification exceeded its safety guard.");
+    }
+
+    const degree = Array(vertexCount + 1).fill(0);
+    const incidentVertices = new Set();
+    for (const [u, v] of remainingEdges) {
+      degree[u] += 1;
+      degree[v] += 1;
+      incidentVertices.add(u);
+      incidentVertices.add(v);
+    }
+
+    if (remainingK >= incidentVertices.size) {
+      trivialAllRemaining = true;
+      remainingEdges = [];
+      break;
+    }
+
+    let changed = false;
+    for (const vertex of incidentVertices) {
+      if (degree[vertex] > remainingK) {
+        forceVertex(vertex, "not choosing this vertex would require too many neighbors");
+        changed = true;
+        break;
+      }
+    }
+    if (changed || impossible) continue;
+
+    for (const [u, v] of remainingEdges) {
+      if (degree[u] === 1) {
+        forceVertex(v, "leaf-neighbor rule");
+        changed = true;
+        break;
+      }
+      if (degree[v] === 1) {
+        forceVertex(u, "leaf-neighbor rule");
+        changed = true;
+        break;
+      }
+    }
+    if (!changed) break;
+  }
+
+  if (impossible) {
+    return {
+      originalVertexCount: vertexCount,
+      originalEdgeCount: normalizeUndirectedEdges(vertexCount, edges).length,
+      originalCoverLimit: coverLimit,
+      remainingVertexCount: 0,
+      remainingEdgeCount: remainingEdges.length,
+      remainingCoverLimit: remainingK,
+      remainingEdges: [],
+      forcedVertices,
+      highDegreeForces,
+      leafNeighborForces,
+      trivialAllRemaining,
+      passes,
+      impossible,
+      impossibleReason,
+      vertexMap: new Map()
+    };
+  }
+
+  const usedVertices = new Set();
+  for (const [u, v] of remainingEdges) {
+    usedVertices.add(u);
+    usedVertices.add(v);
+  }
+  const vertexMap = new Map();
+  Array.from(usedVertices).sort((a, b) => a - b).forEach((vertex, index) => {
+    vertexMap.set(vertex, index + 1);
+  });
+  const reducedEdges = remainingEdges.map(([u, v]) => [vertexMap.get(u), vertexMap.get(v)]);
+
+  return {
+    originalVertexCount: vertexCount,
+    originalEdgeCount: normalizeUndirectedEdges(vertexCount, edges).length,
+    originalCoverLimit: coverLimit,
+    remainingVertexCount: vertexMap.size,
+    remainingEdgeCount: reducedEdges.length,
+    remainingCoverLimit: Math.max(0, remainingK),
+    remainingEdges: reducedEdges,
+    forcedVertices,
+    highDegreeForces,
+    leafNeighborForces,
+    trivialAllRemaining,
+    passes,
+    impossible: false,
+    impossibleReason: "",
+    vertexMap
+  };
+}
+
+function prepareDirectVertexCoverHc(vertexCount, coverLimit, edges, padding = 0, materializeLimit = getHcSolveNodeLimit()) {
+  const simplified = simplifyVertexCoverInstance(vertexCount, coverLimit, edges);
+  if (simplified.impossible) {
+    return {
+      simplified,
+      graph: buildNoPathGraph(),
+      skipped: false,
+      estimatedHcNodes: 3,
+      collapsedNo: true
+    };
+  }
+
+  const estimatedHcNodes = estimateDirectVertexCoverHcNodes(
+    simplified.remainingVertexCount,
+    simplified.remainingCoverLimit,
+    simplified.remainingEdgeCount,
+    padding
+  );
+  if (estimatedHcNodes > materializeLimit) {
+    return {
+      simplified,
+      graph: null,
+      skipped: true,
+      estimatedHcNodes,
+      skipReason: `${estimatedHcNodes} HC nodes is above the HC solve node limit ${materializeLimit}`
+    };
+  }
+
+  return {
+    simplified,
+    graph: buildDirectVertexCoverHcGraph(
+      simplified.remainingVertexCount,
+      simplified.remainingCoverLimit,
+      simplified.remainingEdges,
+      padding
+    ),
+    skipped: false,
+    estimatedHcNodes
   };
 }
 
@@ -2644,6 +2822,48 @@ function appendDirectVertexCoverHcReduction(lines, graph, sourceLabel, answerLab
   return hc;
 }
 
+function appendVertexCoverSimplification(lines, prepared) {
+  const simplified = prepared.simplified;
+  append(lines);
+  append(lines, "Exact Vertex Cover simplification before HC:");
+  append(lines, `original VC vertices = ${simplified.originalVertexCount}`);
+  append(lines, `original VC edges = ${simplified.originalEdgeCount}`);
+  append(lines, `original VC target k = ${simplified.originalCoverLimit}`);
+  append(lines, `forced chosen vertices = ${simplified.forcedVertices.length}`);
+  append(lines, `forced by not-chosen-neighbor consequence = ${simplified.highDegreeForces}`);
+  append(lines, `forced by leaf-neighbor rule = ${simplified.leafNeighborForces}`);
+  append(lines, `simplification passes = ${simplified.passes}`);
+  if (simplified.forcedVertices.length) {
+    append(lines, `forced vertex list = ${simplified.forcedVertices.map(item => `${item.vertex} (${item.reason})`).join(", ")}`);
+  }
+  if (simplified.impossible) {
+    append(lines, `simplification result = impossible (${simplified.impossibleReason})`);
+    append(lines, "collapsed HC instance = small NO witness graph");
+    return;
+  }
+  if (simplified.trivialAllRemaining) {
+    append(lines, "simplification result = remaining incident vertices all fit inside k");
+  }
+  append(lines, `remaining VC vertices = ${simplified.remainingVertexCount}`);
+  append(lines, `remaining VC edges = ${simplified.remainingEdgeCount}`);
+  append(lines, `remaining VC target k = ${simplified.remainingCoverLimit}`);
+  append(lines, `estimated HC nodes after VC simplification = ${prepared.estimatedHcNodes}`);
+}
+
+function appendPreparedDirectVertexCoverHcReduction(lines, prepared, sourceLabel, answerLabel, yesText = "YES", noText = "NO") {
+  appendVertexCoverSimplification(lines, prepared);
+  if (prepared.skipped) {
+    append(lines);
+    append(lines, "NP-douce HC solver result:");
+    append(lines, `HC solver not run because ${prepared.skipReason}.`);
+    append(lines, "Raise the HC solve node limit if you want to force this reduced HC instance through the solver.");
+    append(lines);
+    append(lines, `${answerLabel} answer inferred from HC: NOT COMPUTED`);
+    return { text: "", summary: "", totalTourCost: NaN, hamiltonianFound: false, notComputed: true };
+  }
+  return appendDirectVertexCoverHcReduction(lines, prepared.graph, sourceLabel, answerLabel, yesText, noText);
+}
+
 function clauseLiteralsForVertexCoverTriangle(clause) {
   if (clause.length === 1) return [clause[0], clause[0], clause[0]];
   if (clause.length === 2) return [clause[0], clause[1], clause[1]];
@@ -2710,24 +2930,13 @@ function buildSatToVertexCoverInstance(variableCount, clauses, padding = 0) {
 function prepareSatViaVertexCoverForHc(sat, padding, materializeLimit = getHcSolveNodeLimit()) {
   const simplified = simplify3SatForHc(sat.variableCount, sat.clauses);
   if (simplified.contradiction) {
-    return { simplified, vertexCover: null, graph: null, stats: null, skipped: false };
+    return { simplified, vertexCover: null, direct: null, stats: null, skipped: false };
   }
 
   const stats = estimateSatToVertexCoverReduction(simplified.variableCount, simplified.clauses.length, padding);
-  if (stats.hcNodes > materializeLimit) {
-    return {
-      simplified,
-      vertexCover: null,
-      graph: null,
-      stats,
-      skipped: true,
-      skipReason: `${stats.hcNodes} HC nodes is above the HC solve node limit ${materializeLimit}`
-    };
-  }
-
   const vertexCover = buildSatToVertexCoverInstance(simplified.variableCount, simplified.clauses, padding);
-  const graph = buildDirectVertexCoverHcGraph(vertexCover.n, vertexCover.k, vertexCover.edges, padding);
-  return { simplified, vertexCover, graph, stats, skipped: false };
+  const direct = prepareDirectVertexCoverHc(vertexCover.n, vertexCover.k, vertexCover.edges, padding, materializeLimit);
+  return { simplified, vertexCover, direct, stats, skipped: direct.skipped };
 }
 
 function appendSatViaVertexCoverHcReduction(lines, prepared, sourceLabel, answerLabel, yesText = "YES", noText = "NO") {
@@ -2751,22 +2960,12 @@ function appendSatViaVertexCoverHcReduction(lines, prepared, sourceLabel, answer
   append(lines, `Vertex Cover target k = ${prepared.stats.vertexCoverTarget}`);
   append(lines, `estimated HC nodes after Vertex Cover gadget = ${prepared.stats.hcNodes}`);
 
-  if (prepared.skipped) {
-    append(lines);
-    append(lines, "NP-douce HC solver result:");
-    append(lines, `HC solver not run because ${prepared.skipReason}.`);
-    append(lines, "Raise the HC solve node limit if you want to force this reduced HC instance through the solver.");
-    append(lines);
-    append(lines, `${answerLabel} answer inferred from HC: NOT COMPUTED`);
-    return { text: "", summary: "", totalTourCost: NaN, hamiltonianFound: false, notComputed: true };
-  }
-
-  return appendDirectVertexCoverHcReduction(lines, prepared.graph, sourceLabel, answerLabel, yesText, noText);
+  return appendPreparedDirectVertexCoverHcReduction(lines, prepared.direct, sourceLabel, answerLabel, yesText, noText);
 }
 
 function runVertexCover(text) {
   const { n, k, padding, edges } = parseVertexCover(text);
-  const graph = buildDirectVertexCoverHcGraph(n, k, edges, padding);
+  const prepared = prepareDirectVertexCoverHc(n, k, edges, padding);
 
   const lines = [];
   append(lines, "Vertex Cover instance:");
@@ -2779,7 +2978,7 @@ function runVertexCover(text) {
   append(lines, "Reduction used:");
   append(lines, "Vertex Cover(G, k) -> direct 12-node edge gadgets -> Hamiltonian Cycle");
   append(lines, "Gadget crosses: u1-v3, v1-u3, u6-v4, u4-v6.");
-  appendDirectVertexCoverHcReduction(lines, graph, "Vertex Cover direct HC reduction", "Vertex Cover");
+  appendPreparedDirectVertexCoverHcReduction(lines, prepared, "Vertex Cover direct HC reduction", "Vertex Cover");
   return lines.join("\n");
 }
 
@@ -2787,7 +2986,7 @@ function runClique(text) {
   const { n, k, padding, edges } = parseClique(text);
   const complementEdges = buildComplementEdges(n, edges);
   const vertexCoverK = n - k;
-  const graph = vertexCoverK >= 0 ? buildDirectVertexCoverHcGraph(n, vertexCoverK, complementEdges, padding) : null;
+  const prepared = prepareDirectVertexCoverHc(n, vertexCoverK, complementEdges, padding);
 
   const lines = [];
   append(lines, "Clique instance:");
@@ -2802,21 +3001,14 @@ function runClique(text) {
   append(lines, `complement graph edges = ${complementEdges.length}`);
   append(lines, `vertex cover target on complement = ${vertexCoverK}`);
 
-  if (!graph) {
-    append(lines);
-    append(lines, "Clique answer: NO");
-    append(lines, `k = ${k} is larger than the vertex count ${n}`);
-    return lines.join("\n");
-  }
-
-  appendDirectVertexCoverHcReduction(lines, graph, "Clique via direct Vertex Cover HC reduction", "Clique");
+  appendPreparedDirectVertexCoverHcReduction(lines, prepared, "Clique via direct Vertex Cover HC reduction", "Clique");
   return lines.join("\n");
 }
 
 function runIndependentSet(text) {
   const { n, k, padding, edges } = parseIndependentSet(text);
   const vertexCoverK = n - k;
-  const graph = vertexCoverK >= 0 ? buildDirectVertexCoverHcGraph(n, vertexCoverK, edges, padding) : null;
+  const prepared = prepareDirectVertexCoverHc(n, vertexCoverK, edges, padding);
 
   const lines = [];
   append(lines, "Independent Set instance:");
@@ -2830,14 +3022,7 @@ function runIndependentSet(text) {
   append(lines, "Independent Set(G, k) -> Vertex Cover(G, vertices - k) -> direct 12-node edge gadgets -> Hamiltonian Cycle");
   append(lines, `vertex cover target = ${vertexCoverK}`);
 
-  if (!graph) {
-    append(lines);
-    append(lines, "Independent Set answer: NO");
-    append(lines, `k = ${k} is larger than the vertex count ${n}`);
-    return lines.join("\n");
-  }
-
-  appendDirectVertexCoverHcReduction(lines, graph, "Independent Set via direct Vertex Cover HC reduction", "Independent Set");
+  appendPreparedDirectVertexCoverHcReduction(lines, prepared, "Independent Set via direct Vertex Cover HC reduction", "Independent Set");
   return lines.join("\n");
 }
 
@@ -2978,8 +3163,8 @@ function runSudoku() {
     append(lines, `estimated HC nodes after Vertex Cover gadget = ${stats.hcNodes}`);
   }
   append(lines);
-  if (compactMode && !prepared.simplified.contradiction && !prepared.skipped) {
-    hc = appendDirectVertexCoverHcReduction(lines, prepared.graph, "Sudoku via 3-SAT -> Vertex Cover -> direct HC", "Sudoku", "SOLUTION EXISTS", "NO SOLUTION");
+  if (compactMode && !prepared.simplified.contradiction) {
+    hc = appendPreparedDirectVertexCoverHcReduction(lines, prepared.direct, "Sudoku via 3-SAT -> Vertex Cover -> direct HC", "Sudoku", "SOLUTION EXISTS", "NO SOLUTION");
     if (hc.hamiltonianFound) {
       solution = solveSudokuPuzzle(puzzle);
       if (solution) {
@@ -2989,7 +3174,7 @@ function runSudoku() {
         append(lines, formatSudokuGrid(solution, puzzle.symbols));
       }
     }
-  } else if (!compactMode || !prepared.simplified.contradiction) {
+  } else if (!compactMode) {
     append(lines, "NP-douce HC solver result:");
     append(lines, `HC solver not run because ${stats.hcNodes} nodes is above the safety limit ${denseLimit}${compactMode ? "" : " or the Sudoku is in 25x25 large mode"}.`);
     append(lines, "Sudoku answer inferred from HC: NOT COMPUTED");
@@ -3741,37 +3926,41 @@ document.getElementById("packingBoxRows").addEventListener("click", event => {
 document.getElementById("runPacking3d").addEventListener("click", () => runSafely(() => runPacking3d()));
 document.getElementById("runPairs").addEventListener("click", () => runSafely(() => {
   const { edge, n } = parsePairs(document.getElementById("pairsInput").value);
-  return runTrackingSolver(edge, n, Number(document.getElementById("pairsBeta").value), "browser pairs input", {
+  return runTrackingSolver(edge, n, NaN, "browser pairs input", {
     forceDegreeTwo: true,
     completeWithNeutralEdges: true,
     repairPasses: getHcRepairPasses(),
-    backtrackLimit: getHcBacktrackTries(),
-    scoreMethod: getHcScoreMethod()
+    adaptiveBeta: true,
+    betaMultiplier: 1,
+    scoreMethod: "importance"
   });
 }));
 document.getElementById("runMatrix").addEventListener("click", () => runSafely(() => {
   const { edge, n } = parseMatrix(document.getElementById("matrixInput").value);
-  return runTrackingSolver(edge, n, Number(document.getElementById("matrixBeta").value), "browser matrix input", {
+  return runTrackingSolver(edge, n, NaN, "browser matrix input", {
     repairPasses: getHcRepairPasses(),
-    backtrackLimit: getHcBacktrackTries(),
-    scoreMethod: getHcScoreMethod()
+    adaptiveBeta: true,
+    betaMultiplier: 1,
+    scoreMethod: "importance"
   });
 }));
 document.getElementById("runPoints").addEventListener("click", () => runSafely(() => {
   const { edge, n } = parsePoints(document.getElementById("pointsInput").value);
-  return runTrackingSolver(edge, n, Number(document.getElementById("pointsBeta").value), "browser points input", {
+  return runTrackingSolver(edge, n, NaN, "browser points input", {
     scoreZeroEdges: true,
     repairPasses: getHcRepairPasses(),
-    backtrackLimit: getHcBacktrackTries(),
-    scoreMethod: getHcScoreMethod()
+    adaptiveBeta: true,
+    betaMultiplier: 1,
+    scoreMethod: "importance"
   });
 }));
 document.getElementById("runManual").addEventListener("click", () => runSafely(() => {
   const { edge, n } = parseManual(document.getElementById("manualInput").value);
-  return runTrackingSolver(edge, n, Number(document.getElementById("manualBeta").value), "browser manual input", {
+  return runTrackingSolver(edge, n, NaN, "browser manual input", {
     repairPasses: getHcRepairPasses(),
-    backtrackLimit: getHcBacktrackTries(),
-    scoreMethod: getHcScoreMethod()
+    adaptiveBeta: true,
+    betaMultiplier: 1,
+    scoreMethod: "importance"
   });
 }));
 
