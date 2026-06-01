@@ -36,13 +36,17 @@ If the compressed HC graph is above the app's `HC solve node limit`, the tab rep
 
 Compressed reductions now run the HC solver over the full set of real allowed HC edges from the start. They still skip zero-weight non-edges, because those cannot contribute to the target `-n` Ham[...]
 
+Before the compressed HC graph is built, reduction tabs run an exact unit-clause simplification on the generated 3-SAT formula. A clause like `[-3, -3, -3]` is treated as the unit clause `~x3`, so[...]
+
 `HC beta multiplier` controls the beta temperature used by the reduction solver. The app computes its suggested beta from the graph variance, then multiplies it by this value, so `0.25` means one-[...]
 
 `adaptive beta` changes beta during the HC solve. When it is on, each choice step recomputes the current conditioned standard deviation and uses `beta multiplier / current standard deviation`.
 
-`HC backtrack tries` lets the HC solver revisit close decisions. The score formula ranks every valid edge, the greedy edge is tried first, and alternate branches are kept when their score is close[...]
+`HC backtrack tries` lets the HC solver revisit close decisions. The score formula ranks every valid edge, the greedy edge is tried first, and alternate branches are kept only when their log-score[...]
 
-Candidate edges are normalized with the state function omega. For each valid edge, the app uses the count term `N(e) = 2^(CE - 1) * (n - 1 - VCE + CE)!`, computes `L(e) = ln(N(e)) - beta * mean + [...]
+Candidate edges are normalized with the state function omega. For each valid edge, the app uses the count term `N(e) = 2^(CE - 1) * (n - 1 - VCE + CE)!`, computes `L(e) = ln(N(e)) - beta * mean + [...]`
+
+Before scoring, the HC solver runs the original degree-2 forced-edge precheck: if a vertex has exactly two listed HC edges, both are forced into the tour before the scoring loop continues. The str[...]
 
 `HC repair passes` runs local repair after the math-selected tour. The repair keeps the original HC math as the first pass, fills unfinished reduction tours with neutral zero placeholders, then ac[...]
 

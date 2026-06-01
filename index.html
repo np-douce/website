@@ -36,7 +36,7 @@
       <label>HC solve node limit<input id="hcSolveNodeLimit" type="number" min="0" step="1" value="1000"></label>
       <label>HC beta multiplier<input id="hcBetaMultiplier" type="number" min="0.001" step="0.001" value="1"></label>
       <label>HC repair passes<input id="hcRepairPasses" type="number" min="0" max="100" step="1" value="5"></label>
-      <label>HC backtrack tries<input id="hcBacktrackTries" type="number" min="0" max="100" step="1" value="3"></label>
+      <label>HC backtrack tries<input id="hcBacktrackTries" type="number" min="0" max="100" step="1" value="25"></label>
       <label class="checkLabel"><input id="hcAdaptiveBeta" type="checkbox" checked> adaptive beta</label>
       <p class="fieldNote">Reduction tabs infer answers only when the compressed HC graph is at or under this limit. Raise it to force larger HC solves; larger values can run very slowly.</p>
     </div>
@@ -94,7 +94,7 @@
       <section id="vertexCover" class="panel">
         <div class="panelHead">
           <h2>Vertex Cover to Hamiltonian Cycle</h2>
-          <p>First line is <code>vertices k optional_padding</code>, then one undirected edge per line. Example: <code>4 2</code> followed by <code>1 2</code>, <code>2 3</code>, <code>3 4</code>.</p>
+          <p>First line is <code>vertices k optional_padding</code>, then one undirected edge per line. Example: <code>4 2</code> followed by <code>1 2</code>, <code>2 3</code>, <code>3 4</code>.<[...]
         </div>
         <label>Vertex cover data</label>
         <textarea id="vcInput" spellcheck="false">4 2
@@ -110,7 +110,7 @@
       <section id="clique" class="panel">
         <div class="panelHead">
           <h2>Clique to Hamiltonian Cycle</h2>
-          <p>First line is <code>vertices k optional_padding</code>, then one undirected edge per line. Example: <code>5 3</code> followed by <code>1 2</code>, <code>1 3</code>, <code>2 3</code>.</p>
+          <p>First line is <code>vertices k optional_padding</code>, then one undirected edge per line. Example: <code>5 3</code> followed by <code>1 2</code>, <code>1 3</code>, <code>2 3</code>.[...]
         </div>
         <label>Clique data</label>
         <textarea id="cliqueInput" spellcheck="false">5 3
@@ -128,7 +128,7 @@
       <section id="independentSet" class="panel">
         <div class="panelHead">
           <h2>Independent Set to Hamiltonian Cycle</h2>
-          <p>First line is <code>vertices k optional_padding</code>, then one undirected edge per line. Example: <code>5 3</code> followed by <code>1 2</code>, <code>2 3</code>, <code>3 4</code>, <code>4 5</code>.</p>
+          <p>First line is <code>vertices k optional_padding</code>, then one undirected edge per line. Example: <code>5 3</code> followed by <code>1 2</code>, <code>2 3</code>, <code>3 4</code>,[...]
         </div>
         <label>Independent set data</label>
         <textarea id="isInput" spellcheck="false">5 3
@@ -145,7 +145,7 @@
       <section id="setCover" class="panel">
         <div class="panelHead">
           <h2>Set Cover to Hamiltonian Cycle</h2>
-          <p>First line is <code>universe_size set_count k optional_padding</code>, then one set per line using element numbers. Example: <code>5 4 2</code> followed by <code>1 2</code>, <code>2 3 4</code>, <code>4 5</code>, <code>1 5</code>.</p>
+          <p>First line is <code>universe_size set_count k optional_padding</code>, then one set per line using element numbers. Example: <code>5 4 2</code> followed by <code>1 2</code>, <code>2 [...]>
         </div>
         <label>Set cover data</label>
         <textarea id="setCoverInput" spellcheck="false">5 4 2
@@ -162,7 +162,7 @@
       <section id="x3c" class="panel">
         <div class="panelHead">
           <h2>X3C to Hamiltonian Cycle</h2>
-          <p>First line is <code>universe_size set_count optional_padding</code>, then one 3-element set per line. Example: <code>6 4</code> followed by <code>1 2 3</code>, <code>4 5 6</code>, <code>1 4 5</code>, <code>2 3 6</code>.</p>
+          <p>First line is <code>universe_size set_count optional_padding</code>, then one 3-element set per line. Example: <code>6 4</code> followed by <code>1 2 3</code>, <code>4 5 6</code>, <c[...]
         </div>
         <label>X3C data</label>
         <textarea id="x3cInput" spellcheck="false">6 4
@@ -205,7 +205,7 @@
           <label>Box size<input id="sudokuBoxSize" type="number" min="1" max="5" step="1" value="3"></label>
           <label>Dense HC calculation node limit<input id="sudokuHcLimit" type="number" min="0" step="1" value="10000"></label>
         </div>
-        <p class="fieldNote">Box size 3 means a 9x9 Sudoku, 4 means 16x16, and 5 means 25x25. Even 9x9 creates far more than 1000 HC nodes, so it reports NOT COMPUTED unless you raise the HC limits.</p>
+        <p class="fieldNote">Box size 3 means a 9x9 Sudoku, 4 means 16x16, and 5 means 25x25. Even 9x9 creates far more than 1000 HC nodes, so it reports NOT COMPUTED unless you raise the HC limi[...]
 
         <div class="controls">
           <button id="buildSudokuGrid" type="button">Build grid</button>
