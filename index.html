@@ -35,56 +35,25 @@
     <div class="globalControls">
       <label>HC solve node limit<input id="hcSolveNodeLimit" type="number" min="0" step="1" value="1000"></label>
       <label>HC beta multiplier<input id="hcBetaMultiplier" type="number" min="0.001" step="0.001" value="1"></label>
+      <label>HC score method<select id="hcScoreMethod">
+        <option value="importance" selected>Importance</option>
+        <option value="omega">Omega lnZ</option>
+      </select></label>
       <label>HC repair passes<input id="hcRepairPasses" type="number" min="0" max="100" step="1" value="5"></label>
       <label>HC backtrack tries<input id="hcBacktrackTries" type="number" min="0" max="100" step="1" value="25"></label>
       <label class="checkLabel"><input id="hcAdaptiveBeta" type="checkbox" checked> adaptive beta</label>
-      <p class="fieldNote">Reduction tabs infer answers only when the compressed HC graph is at or under this limit. Raise it to force larger HC solves; larger values can run very slowly.</p>
+      <p class="fieldNote">Reduction tabs infer answers only when the reduced HC graph is at or under this limit. Raise it to force larger HC solves; larger values can run very slowly.</p>
     </div>
 
     <section class="workspace">
       <section id="sat3" class="panel active">
         <div class="panelHead">
           <h2>3-SAT to Hamiltonian Cycle</h2>
-          <p>Uses the compressed polynomial reduction with the degree-2 forced-edge precheck. The optional third number on the first line adds forced padding nodes.</p>
+          <p>Uses the classic 3-SAT to Vertex Cover triangle reduction, then the direct Hamiltonian-cycle gadget with the degree-2 forced-edge precheck. The optional third number on the first line adds forced padding nodes.</p>
         </div>
         <label>3-SAT data</label>
-        <textarea id="satInput" spellcheck="false">10 36
-1 2 3
--1 4 5
--2 -4 6
-3 -5 7
--6 8 9
--7 -8 10
-1 -9 -10
--1 -2 8
-2 -3 -6
--4 5 -9
-6 7 -10
--5 -7 9
-3 4 -8
--2 6 10
--1 -3 -5
-2 7 8
--4 -6 -9
-1 5 10
--7 8 -10
-3 -6 9
--2 4 -8
-5 -7 10
--1 6 -9
-2 -5 8
--3 4 7
-1 -6 -10
--2 5 9
-3 -4 8
--1 7 -9
-2 6 10
--5 -8 9
-1 -3 4
--2 7 -10
-5 6 -8
--1 -4 9
-3 7 10</textarea>
+        <textarea id="satInput" spellcheck="false">1 1
+1 1 1</textarea>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="satFile" accept=".txt"></label>
           <button id="runSat">Run 3-SAT reduction</button>
@@ -145,14 +114,11 @@
       <section id="setCover" class="panel">
         <div class="panelHead">
           <h2>Set Cover to Hamiltonian Cycle</h2>
-          <p>First line is <code>universe_size set_count k optional_padding</code>, then one set per line using element numbers. Example: <code>5 4 2</code> followed by <code>1 2</code>, <code>2 3 4</code>, <code>4 5</code>, <code>1 5</code>.</p>
+          <p>First line is <code>universe_size set_count k optional_padding</code>, then one set per line using element numbers. Example: <code>1 1 1</code> followed by <code>1</code>.</p>
         </div>
         <label>Set cover data</label>
-        <textarea id="setCoverInput" spellcheck="false">5 4 2
-1 2
-2 3 4
-4 5
-1 5</textarea>
+        <textarea id="setCoverInput" spellcheck="false">1 1 1
+1</textarea>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="setCoverFile" accept=".txt"></label>
           <button id="runSetCover">Run set cover reduction</button>
@@ -162,14 +128,11 @@
       <section id="x3c" class="panel">
         <div class="panelHead">
           <h2>X3C to Hamiltonian Cycle</h2>
-          <p>First line is <code>universe_size set_count optional_padding</code>, then one 3-element set per line. Example: <code>6 4</code> followed by <code>1 2 3</code>, <code>4 5 6</code>, <code>1 4 5</code>, <code>2 3 6</code>.</p>
+          <p>First line is <code>universe_size set_count optional_padding</code>, then one 3-element set per line. Example: <code>3 1</code> followed by <code>1 2 3</code>.</p>
         </div>
         <label>X3C data</label>
-        <textarea id="x3cInput" spellcheck="false">6 4
-1 2 3
-4 5 6
-1 4 5
-2 3 6</textarea>
+        <textarea id="x3cInput" spellcheck="false">3 1
+1 2 3</textarea>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="x3cFile" accept=".txt"></label>
           <button id="runX3c">Run X3C reduction</button>
@@ -179,16 +142,10 @@
       <section id="graphColoring" class="panel">
         <div class="panelHead">
           <h2>Graph Coloring to Hamiltonian Cycle</h2>
-          <p>First line is <code>vertices edges colors optional_padding</code>, then one undirected edge per line. Example: <code>4 6 4</code> followed by all six edges of <code>K4</code>.</p>
+          <p>First line is <code>vertices edges colors optional_padding</code>, then one undirected edge per line. Example: <code>1 0 1</code> for one vertex and no edges.</p>
         </div>
         <label>Graph coloring data</label>
-        <textarea id="graphColoringInput" spellcheck="false">4 6 4
-1 2
-1 3
-1 4
-2 3
-2 4
-3 4</textarea>
+        <textarea id="graphColoringInput" spellcheck="false">1 0 1</textarea>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="graphColoringFile" accept=".txt"></label>
           <button id="runGraphColoring">Run graph coloring reduction</button>
@@ -198,7 +155,7 @@
       <section id="sudoku" class="panel widePanel">
         <div class="panelHead">
           <h2>Sudoku to Hamiltonian Cycle</h2>
-          <p>Visual Sudoku solver with the exact placement reduction: Sudoku -> exact cover style 3-SAT -> compressed Hamiltonian Cycle.</p>
+          <p>Visual Sudoku solver with the exact placement reduction: Sudoku -> exact cover style 3-SAT -> Vertex Cover -> Hamiltonian Cycle.</p>
         </div>
 
         <div class="formGrid">
@@ -220,7 +177,7 @@
       <section id="packing3d" class="panel widePanel">
         <div class="panelHead">
           <h2>3D Packing to Hamiltonian Cycle</h2>
-          <p>Builds a practical truck load, draws a 3D view, then creates a compact candidate-placement reduction for the compressed HC solver.</p>
+          <p>Builds a practical truck load, draws a 3D view, then creates a candidate-placement 3-SAT reduction that flows through Vertex Cover into the HC solver.</p>
         </div>
 
         <div class="formGrid">

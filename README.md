@@ -6,15 +6,15 @@ The app is static: it uses only local HTML, CSS, and JavaScript. No server is re
 
 ## Included tools
 
-- 3-SAT polynomial Hamiltonian-cycle reduction
-- Vertex Cover to 3-SAT to compressed Hamiltonian-cycle reduction
-- Clique to Vertex Cover complement to 3-SAT to compressed Hamiltonian-cycle reduction
-- Independent Set to Vertex Cover to 3-SAT to compressed Hamiltonian-cycle reduction
-- Set Cover to 3-SAT to compressed Hamiltonian-cycle reduction
-- X3C to 3-SAT to compressed Hamiltonian-cycle reduction
-- Graph Coloring to 3-SAT to compressed Hamiltonian-cycle reduction
-- Visual Sudoku to exact-cover 3-SAT to compressed Hamiltonian-cycle reduction
-- 3D truck/container packing with a compact candidate-placement HC reduction
+- 3-SAT to classic Vertex Cover to direct Hamiltonian-cycle reduction
+- Vertex Cover to direct 12-node-gadget Hamiltonian-cycle reduction
+- Clique to Vertex Cover complement to direct 12-node-gadget Hamiltonian-cycle reduction
+- Independent Set to Vertex Cover to direct 12-node-gadget Hamiltonian-cycle reduction
+- Set Cover to 3-SAT to Vertex Cover to direct Hamiltonian-cycle reduction
+- X3C to 3-SAT to Vertex Cover to direct Hamiltonian-cycle reduction
+- Graph Coloring to 3-SAT to Vertex Cover to direct Hamiltonian-cycle reduction
+- Visual Sudoku to exact-cover 3-SAT to Vertex Cover to direct Hamiltonian-cycle reduction
+- 3D truck/container packing with candidate-placement 3-SAT to Vertex Cover to HC
 - Hamiltonian pairs input
 - Matrix input
 - Euclidean points input
@@ -29,16 +29,18 @@ Large Hamiltonian graphs can still be expensive because the original theory incl
 Reduction tabs now use this strict flow for their displayed answer:
 
 ```text
-original problem -> reduction -> compressed HC graph -> NP-douce HC solver -> inferred original answer
+original problem -> reduction -> HC graph -> NP-douce HC solver -> inferred original answer
 ```
 
-If the compressed HC graph is above the app's `HC solve node limit`, the tab reports `NOT COMPUTED` instead of using a separate direct solver. Raise the limit when you want to force a larger reduced HC instance through the solver, but large values can run very slowly.
+If the reduced HC graph is above the app's `HC solve node limit`, the tab reports `NOT COMPUTED` instead of using a separate direct solver. Raise the limit when you want to force a larger reduced HC instance through the solver, but large values can run very slowly.
 
-Compressed reductions now run the HC solver over the full set of real allowed HC edges from the start. They still skip zero-weight non-edges, because those cannot contribute to the target `-n` Hamiltonian tour.
+Reduction tabs run the HC solver over the full set of real allowed HC edges from the start. They still skip zero-weight non-edges, because those cannot contribute to the target `-n` Hamiltonian tour.
 
-Before the compressed HC graph is built, reduction tabs run an exact unit-clause simplification on the generated 3-SAT formula. A clause like `[-3, -3, -3]` is treated as the unit clause `~x3`, so `x3=false` is forced, satisfied clauses are removed, and only the remaining formula is sent into the HC scorer. Binary clauses are kept as two-literal clauses internally instead of duplicating one literal, which avoids duplicate clause-gadget ports and usually reduces the HC node count.
+Before a generated 3-SAT formula is sent to Vertex Cover, reduction tabs run exact unit-clause simplification. A clause like `[-3, -3, -3]` is treated as the unit clause `~x3`, so `x3=false` is forced and satisfied clauses are removed. Binary clauses are kept during simplification, then the classic Vertex Cover clause triangle duplicates one literal when a two-literal clause must become a 3-literal triangle.
 
 `HC beta multiplier` controls the beta temperature used by the reduction solver. The app computes its suggested beta from the graph variance, then multiplies it by this value, so `0.25` means one-quarter of the suggested beta.
+
+`HC score method` can use the importance score `lnZ(CE + e) - lnZ(CE without e)` or the older omega score `lnZ(CE + e)`. The importance score is selected by default so it can be tested directly against the raw edge score.
 
 `adaptive beta` changes beta during the HC solve. When it is on, each choice step recomputes the current conditioned standard deviation and uses `beta multiplier / current standard deviation`.
 
@@ -55,7 +57,7 @@ Before scoring, the HC solver runs the original degree-2 forced-edge precheck: i
 The first line is:
 
 ```text
-variables clauses optional_padding_directed_nodes
+variables clauses optional_padding_nodes
 ```
 
 Each following line is one clause with three integer literals:
@@ -70,10 +72,19 @@ This means:
 (x1 OR ~x2 OR x3)
 ```
 
-Node count for the polynomial reduction:
+After simplification, the classic route is:
 
 ```text
-undirected nodes = 3 * (variables * (clauses + 1) + clauses + 2 + padding)
+3-SAT -> Vertex Cover clause triangles -> direct Vertex Cover HC gadget
+```
+
+For `V` simplified SAT variables and `C` simplified clauses:
+
+```text
+Vertex Cover vertices = 2V + 3C
+Vertex Cover edges = V + 6C
+Vertex Cover target k = V + 2C
+estimated HC nodes = 12 * (V + 6C) + 2 * (V + 2C) + padding
 ```
 
 ## Vertex Cover input format
@@ -81,7 +92,7 @@ undirected nodes = 3 * (variables * (clauses + 1) + clauses + 2 + padding)
 The first line is:
 
 ```text
-vertices k optional_padding_directed_nodes
+vertices k optional_padding_nodes
 ```
 
 Each following line is one undirected edge:
@@ -91,16 +102,22 @@ Each following line is one undirected edge:
 2 3
 ```
 
-The app reduces the instance to 3-SAT, builds the compressed Hamiltonian-cycle graph, runs the NP-douce HC solver when under the node limit, and infers whether a vertex cover of size at most `k` exists from the HC result.
+The app uses the direct classic Vertex Cover to Hamiltonian Cycle construction. Each original graph edge becomes a 12-node gadget with endpoint rows and crosses `u1-v3`, `v1-u3`, `u6-v4`, and `u4-v6`. Selector slots choose up to `k` vertex paths.
 
-The at-most-`k` part uses a sequential counter encoding, so it grows closer to `O(vertices * k)` instead of enumerating every `k + 1` subset.
+Incident rows for the same original vertex are linked as `u6 -> next u1`, so the degree-2 precheck collapses most of each gadget before the remaining selector and cross edges are scored by the HC solver.
+
+Node count for this direct reduction is roughly:
+
+```text
+undirected nodes = 12 * edges + 2 * min(k, vertices) + padding
+```
 
 ## Clique input format
 
 The first line is:
 
 ```text
-vertices k optional_padding_directed_nodes
+vertices k optional_padding_nodes
 ```
 
 Each following line is one undirected edge:
@@ -114,7 +131,7 @@ Each following line is one undirected edge:
 This asks whether the graph has a clique of size at least `k`. The app uses the standard practical reduction:
 
 ```text
-Clique(G, k) -> Vertex Cover(complement(G), vertices - k) -> 3-SAT -> compressed Hamiltonian Cycle
+Clique(G, k) -> Vertex Cover(complement(G), vertices - k) -> direct 12-node-gadget Hamiltonian Cycle
 ```
 
 Example:
@@ -128,14 +145,14 @@ Example:
 4 5
 ```
 
-This example has a clique `{1, 2, 3}`. The Hamiltonian-cycle side still uses the compressed reduction and degree-2 forced-edge precheck.
+This example has a clique `{1, 2, 3}`. The Hamiltonian-cycle side uses the direct Vertex Cover gadget and degree-2 forced-edge precheck.
 
 ## Independent Set input format
 
 The first line is:
 
 ```text
-vertices k optional_padding_directed_nodes
+vertices k optional_padding_nodes
 ```
 
 Each following line is one undirected edge:
@@ -150,7 +167,7 @@ Each following line is one undirected edge:
 This asks whether the graph has an independent set of size at least `k`. The app uses the shorter standard reduction:
 
 ```text
-Independent Set(G, k) -> Vertex Cover(G, vertices - k) -> 3-SAT -> compressed Hamiltonian Cycle
+Independent Set(G, k) -> Vertex Cover(G, vertices - k) -> direct 12-node-gadget Hamiltonian Cycle
 ```
 
 Example:
@@ -170,7 +187,7 @@ This example has an independent set `{1, 3, 5}`. Because this route goes directl
 The first line is:
 
 ```text
-universe_size set_count k optional_padding_directed_nodes
+universe_size set_count k optional_padding_nodes
 ```
 
 Each following line is one set, written as element numbers from `1` through `universe_size`:
@@ -185,7 +202,7 @@ Each following line is one set, written as element numbers from `1` through `uni
 This asks whether at most `k` sets cover every universe element. The app uses:
 
 ```text
-Set Cover -> 3-SAT coverage clauses plus at-most-k -> compressed Hamiltonian Cycle
+Set Cover -> 3-SAT coverage clauses plus at-most-k -> Vertex Cover clause triangles -> direct Hamiltonian Cycle
 ```
 
 Example:
@@ -205,7 +222,7 @@ This example has a set cover `{S2, S4}`. The 3-SAT encoding uses one Boolean var
 The first line is:
 
 ```text
-universe_size set_count optional_padding_directed_nodes
+universe_size set_count optional_padding_nodes
 ```
 
 Each following line is one 3-element set, written as element numbers from `1` through `universe_size`:
@@ -220,7 +237,7 @@ Each following line is one 3-element set, written as element numbers from `1` th
 This asks whether the universe can be covered exactly once by disjoint 3-sets. The app uses:
 
 ```text
-X3C -> 3-SAT exactly-once coverage clauses -> compressed Hamiltonian Cycle
+X3C -> 3-SAT exactly-once coverage clauses -> Vertex Cover clause triangles -> direct Hamiltonian Cycle
 ```
 
 Example:
@@ -240,7 +257,7 @@ This example has an exact cover `{S1, S2}`. The 3-SAT encoding uses one Boolean 
 The first line is:
 
 ```text
-vertices edges colors optional_padding_directed_nodes
+vertices edges colors optional_padding_nodes
 ```
 
 Each following line is one undirected edge:
@@ -255,7 +272,7 @@ Each following line is one undirected edge:
 This asks whether every vertex can be colored with the requested number of colors so that connected vertices have different colors. The app uses:
 
 ```text
-Graph Coloring -> 3-SAT color clauses -> compressed Hamiltonian Cycle
+Graph Coloring -> 3-SAT color clauses -> Vertex Cover clause triangles -> direct Hamiltonian Cycle
 ```
 
 Example 3-colorable instance:
@@ -310,10 +327,10 @@ each cell has exactly one digit
 each row has each digit once
 each column has each digit once
 each box has each digit once
-Sudoku -> exact cover style 3-SAT -> compressed Hamiltonian Cycle
+Sudoku -> exact cover style 3-SAT -> Vertex Cover clause triangles -> direct Hamiltonian Cycle
 ```
 
-For 4x4, 9x9, and 16x16, the exact reduction size and degree-2 forced-edge precheck are posted. For 25x25, the app counts the exact 3-SAT and compressed-HC size without materializing every clause and edge, because the full graph is too large for browser memory. Sudoku only displays a filled visual witness after the HC solver returns YES for a materialized reduced graph.
+For 4x4, 9x9, and 16x16, the exact reduction size is posted, and the degree-2 forced-edge precheck is posted when the HC graph is small enough to materialize. For 25x25, the app counts the exact 3-SAT and estimated Vertex-Cover-to-HC size without materializing every clause and edge, because the full graph is too large for browser memory. Sudoku only displays a filled visual witness after the HC solver returns YES for a materialized reduced graph.
 
 ## 3D Packing tool
 
@@ -338,7 +355,7 @@ The app first builds a practical extreme-point packing and draws it in the canva
 one variable = one box at one generated position and orientation
 one box chooses one candidate
 overlapping candidates cannot both be chosen
-candidate-placement 3-SAT -> compressed Hamiltonian Cycle
+candidate-placement 3-SAT -> Vertex Cover clause triangles -> direct Hamiltonian Cycle
 ```
 
-The Hamiltonian-cycle side uses the same compressed reduction and degree-2 forced-edge precheck as the other NP-complete tools. Raise max packing options sent to HC when you want broader HC search space; lower it when you want fewer nodes and faster runs.
+The Hamiltonian-cycle side uses the same classic 3-SAT-to-Vertex-Cover bridge and degree-2 forced-edge precheck as the other SAT-based NP-complete tools. Raise max packing options sent to HC when you want broader HC search space; lower it when you want fewer nodes and faster runs.
