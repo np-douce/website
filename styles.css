@@ -75,7 +75,7 @@ p {
 
 .globalControls {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  grid-template-columns: repeat(5, minmax(130px, 200px)) minmax(0, 1fr);
   gap: 10px 14px;
   align-items: end;
   margin-bottom: 16px;
@@ -133,7 +133,7 @@ label {
   font-weight: 700;
 }
 
-textarea, input, select {
+textarea, input {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -148,7 +148,7 @@ textarea {
   padding: 12px;
 }
 
-input, select {
+input {
   min-height: 40px;
   padding: 8px 10px;
 }
@@ -177,7 +177,6 @@ input[type="checkbox"] {
 }
 
 .fieldNote {
-  grid-column: 1 / -1;
   margin-top: 8px;
   font-size: 13px;
 }
