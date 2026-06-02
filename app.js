@@ -7,6 +7,7 @@ function write(text) {
 }
 
 function append(lines, text = "") {
+  if (!lines) return;
   lines.push(text);
 }
 
@@ -1153,11 +1154,11 @@ function resolveStepBeta(n, edge, edgeSquared, endpointLink, state, options, las
 }
 
 function finishTourFromState(edge, n, endpointLink, state, options) {
-  const lines = [];
+  const lines = options.compactOutput ? null : [];
   if (state.invalid) {
     append(lines, `Solver branch stopped: ${state.invalidReason || "forced propagation contradiction"}`);
     return {
-      lines,
+      lines: lines || [],
       totalTourCost: NaN,
       partialTourCost: state.chosenEdgeTotal,
       hamiltonianFound: false,
@@ -1208,7 +1209,7 @@ function finishTourFromState(edge, n, endpointLink, state, options) {
   }
 
   return {
-    lines,
+    lines: lines || [],
     totalTourCost,
     hamiltonianFound: Math.abs(totalTourCost + n) < 1e-9,
     chosenEdges,
@@ -1268,6 +1269,7 @@ function selectSmartBacktrackAlternatives(ranked, maxAlternatives, options = {})
 }
 
 function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, rootState, searchOptions) {
+  const includeTrace = !searchOptions.compactOutput;
   const requestedTries = Math.max(1, Math.floor(searchOptions.backtrackLimit));
   const alternativesPerSplit = Math.max(1, Math.floor(searchOptions.alternativesPerSplit || 2));
   const initialEdgeCount = countPotentialSearchEdges(edge, n, rootState);
@@ -1320,7 +1322,7 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
     while (remainingChoices(n, branch.state) > 0) {
       const betaInfo = resolveStepBeta(n, edge, edgeSquared, branch.endpointLink, branch.state, searchOptions, branch.lastAdaptiveBeta);
       branch.lastAdaptiveBeta = betaInfo.lastAdaptiveBeta;
-      if (searchOptions.adaptiveBeta && branch.trace.lines.length < 80) {
+      if (includeTrace && searchOptions.adaptiveBeta && branch.trace.lines.length < 80) {
         appendTraceLine(branch.trace, `current standard deviation = ${formatNumber(betaInfo.standardDeviation)} adaptive beta = ${formatNumber(betaInfo.beta)}`);
       }
 
@@ -1343,11 +1345,12 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
         const altForced = propagateConfiguredForcedEdges(edge, n, altEndpointLink, altState, searchOptions);
         if (altState.invalid) continue;
         const regret = alternativeInfo.regret;
-        const altTrace = {
-          lines: branch.trace.lines.slice(),
-          omitted: branch.trace.omitted
-        };
-        appendTraceLine(altTrace, `backtrack choice: Edge[${alternative.from}][${alternative.to}] ${formatCandidateChoice(alternative)} regret ${formatNumber(regret)}`);
+        const altTrace = includeTrace
+          ? { lines: branch.trace.lines.slice(), omitted: branch.trace.omitted }
+          : { lines: [], omitted: 0 };
+        if (includeTrace) {
+          appendTraceLine(altTrace, `backtrack choice: Edge[${alternative.from}][${alternative.to}] ${formatCandidateChoice(alternative)} regret ${formatNumber(regret)}`);
+        }
         queue.push({
           endpointLink: altEndpointLink,
           state: altState,
@@ -1363,14 +1366,16 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
         }
       }
 
-      appendTraceLine(branch.trace, `chosen edge: Edge[${best.from}][${best.to}] ${formatCandidateChoice(best)} omega ${formatNumber(best.omega)} log-omega ${formatNumber(best.logOmega)}`);
+      if (includeTrace) {
+        appendTraceLine(branch.trace, `chosen edge: Edge[${best.from}][${best.to}] ${formatCandidateChoice(best)} omega ${formatNumber(best.omega)} log-omega ${formatNumber(best.logOmega)}`);
+      }
       if (!applyChosenEdge(best.from, best.to, edge, branch.endpointLink, branch.state)) {
         stoppedBecause = "chosen edge became invalid";
         break;
       }
       if (searchOptions.forceDegreeTwo || searchOptions.vertexCoverPropagation) {
         const forcedAfterChoice = propagateConfiguredForcedEdges(edge, n, branch.endpointLink, branch.state, searchOptions);
-        if (forcedAfterChoice.forcedEdgeCount > 0) {
+        if (includeTrace && forcedAfterChoice.forcedEdgeCount > 0) {
           appendTraceLine(branch.trace, `Forced propagation added ${forcedAfterChoice.forcedEdgeCount} edges.`);
         }
         if (branch.state.invalid) {
@@ -1403,7 +1408,7 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
     }
   }
 
-  const lines = [];
+  const lines = includeTrace ? [] : null;
   append(lines, "Score-guided backtracking:");
   append(lines, `backtrack try limit = ${maxTries}`);
   append(lines, `requested backtrack tries = ${requestedTries}`);
@@ -1422,7 +1427,7 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
       bestFinals.forEach((candidate, index) => append(lines, formatMinimumTourWitness(candidate, index + 1)));
     }
   }
-  if (bestFinal) {
+  if (includeTrace && bestFinal) {
     append(lines, "Best branch trace:");
     bestFinal.trace.lines.forEach(line => append(lines, line));
     if (bestFinal.trace.omitted > 0) append(lines, `... ${bestFinal.trace.omitted} trace lines omitted ...`);
@@ -1434,8 +1439,15 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
       hamiltonianFound: bestFinal.hamiltonianFound
     };
   }
-  append(lines, "No branch was completed.");
-  return { lines, totalTourCost: NaN, partialTourCost: NaN, hamiltonianFound: false };
+  if (!bestFinal) append(lines, "No branch was completed.");
+  return bestFinal
+    ? {
+      lines: lines || [],
+      totalTourCost: bestFinal.totalTourCost,
+      partialTourCost: bestFinal.totalTourCost,
+      hamiltonianFound: bestFinal.hamiltonianFound
+    }
+    : { lines: lines || [], totalTourCost: NaN, partialTourCost: NaN, hamiltonianFound: false };
 }
 
 function applyDegreeTwoForcedEdges(edge, n, endpointLink, state) {
@@ -1631,7 +1643,7 @@ function propagateConfiguredForcedEdges(edge, n, endpointLink, state, options = 
 
 function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
   if (n < 2) throw new Error("Need at least 2 vertices.");
-  const lines = [];
+  const lines = options.compactOutput ? null : [];
   if (!options.allowedEdges && options.allowedEdgeKeys) {
     options.allowedEdges = Array.from(options.allowedEdgeKeys).map(key => {
       const [from, to] = key.split(":").map(Number);
@@ -1708,7 +1720,7 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
       }
     }
     return {
-      text: lines.join("\n"),
+      text: lines ? lines.join("\n") : "",
       totalTourCost: search.totalTourCost,
       partialTourCost: search.partialTourCost,
       hamiltonianFound: search.hamiltonianFound,
@@ -1764,7 +1776,7 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
   }
   append(lines, `Total tour cost = ${formatNumber(totalTourCost)}`);
   return {
-    text: lines.join("\n"),
+    text: lines ? lines.join("\n") : "",
     totalTourCost,
     hamiltonianFound,
     moments
@@ -1772,7 +1784,7 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
 }
 
 function runTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
-  const result = solveTrackingSolver(edge, n, beta, sourceLabel, options);
+  const result = solveTrackingSolver(edge, n, beta, sourceLabel, { ...options, compactOutput: true });
   const lines = [];
   append(lines, "Final answer:");
   append(lines, result.hamiltonianFound ? "HC decision: HAMILTONIAN CYCLE FOUND" : "HC decision: HAMILTONIAN CYCLE NOT FOUND");
@@ -1825,6 +1837,7 @@ function runCompressedHcDecision(graph, sourceLabel) {
   if (graph.n > limit) {
     const lines = [];
     append(lines, "NP-douce HC solver result:");
+    append(lines, `HC nodes = ${graph.n}`);
     append(lines, `HC solver not run because ${graph.n} nodes is above the HC solve node limit ${limit}.`);
     append(lines, "Raise the HC solve node limit if you want to force this reduced HC instance through the solver.");
     return { text: "", summary: lines.join("\n"), totalTourCost: NaN, hamiltonianFound: false, notComputed: true };
@@ -1845,10 +1858,12 @@ function runCompressedHcDecision(graph, sourceLabel) {
     completeWithNeutralEdges: true,
     adaptiveBeta: true,
     betaMultiplier: 1,
-    scoreMethod: "importance"
+    scoreMethod: "importance",
+    compactOutput: true
   });
   const lines = [];
   append(lines, "NP-douce HC solver result:");
+  append(lines, `HC nodes = ${graph.n}`);
   if (graph.allowedEdgeKeys) append(lines, `allowed HC edges scored = ${graph.allowedEdgeKeys.size}`);
   if (graph.vertexCoverPropagation) append(lines, "VC gadget propagation = on");
   append(lines, "HC score method = importance (automatic)");
@@ -1865,9 +1880,6 @@ function runCompressedHcDecision(graph, sourceLabel) {
   }
   append(lines, `HC target cost = ${formatNumber(-graph.n)}`);
   append(lines, result.hamiltonianFound ? "HC decision: HAMILTONIAN CYCLE FOUND" : "HC decision: HAMILTONIAN CYCLE NOT FOUND");
-  append(lines);
-  append(lines, "HC solver trace:");
-  append(lines, result.text);
   return { ...result, summary: lines.join("\n"), notComputed: false };
 }
 
@@ -3514,30 +3526,6 @@ function summarizeLargeSudokuReduction(puzzle) {
 }
 
 function appendDirectVertexCoverHcReduction(lines, graph, sourceLabel, answerLabel, yesText = "YES", noText = "NO", witnessBuilder = null) {
-  append(lines);
-  append(lines, "Direct Vertex Cover -> Hamiltonian Cycle reduction size:");
-  append(lines, `edge gadgets = ${graph.gadgetCount}`);
-  append(lines, `12-node gadget vertices = ${12 * graph.gadgetCount}`);
-  append(lines, `selector slots = ${graph.selectorSlots}`);
-  append(lines, `padding nodes = ${graph.paddingNodes || 0}`);
-  append(lines, `undirected HC nodes = ${graph.n}`);
-  append(lines, `allowed HC edges = ${graph.allowedEdgeKeys ? graph.allowedEdgeKeys.size : 0}`);
-  if (graph.decisionEdgeKeys) append(lines, `decision-style edges = ${graph.decisionEdgeKeys.size}`);
-  if (graph.vertexCoverPropagation) {
-    append(lines, "VC consequence rules = on");
-    const connectorCount = graph.vertexCoverPropagation.connectorEdgesByVertex
-      .reduce((sum, connectors) => sum + connectors.length, 0);
-    append(lines, `VC selected-vertex connector edges = ${connectorCount}`);
-    append(lines, `VC rejection patterns = ${graph.vertexCoverPropagation.rejectionPatterns.length}`);
-  }
-
-  const forced = findDegreeTwoForcedEdges(graph.edge, graph.n);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
-  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
-  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
-  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
-
   const hc = runCompressedHcDecision(graph, sourceLabel);
   const answerLine = inferredAnswerLine(hc, answerLabel, yesText, noText);
   append(lines);
@@ -3636,35 +3624,19 @@ function prepareSatViaVertexCoverForHc(sat, padding, materializeLimit = getHcSol
 }
 
 function appendSatViaVertexCoverHcReduction(lines, prepared, sourceLabel, answerLabel, yesText = "YES", noText = "NO", witnessBuilder = null) {
-  append(lines);
-  appendSatSimplificationSummary(lines, prepared.simplified);
   if (prepared.simplified.contradiction) {
-    append(lines);
-    append(lines, "NP-douce HC solver result:");
-    append(lines, "HC solver skipped because exact unit propagation already proved the reduced SAT formula impossible.");
-    append(lines);
     append(lines, "Final answer:");
     append(lines, `${answerLabel} answer after exact unit simplification: ${noText}`);
     return { text: "", summary: "", totalTourCost: NaN, hamiltonianFound: false, notComputed: true };
   }
 
-  append(lines);
-  append(lines, "Classic 3-SAT -> Vertex Cover size:");
-  append(lines, `SAT variables sent to Vertex Cover = ${prepared.stats.variableCount}`);
-  append(lines, `SAT clauses sent to Vertex Cover = ${prepared.stats.clauseCount}`);
-  append(lines, `Vertex Cover vertices = ${prepared.stats.vertexCoverVertices}`);
-  append(lines, `Vertex Cover edges = ${prepared.stats.vertexCoverEdges}`);
-  append(lines, `Vertex Cover target k = ${prepared.stats.vertexCoverTarget}`);
-  append(lines, `estimated HC nodes after Vertex Cover gadget = ${prepared.stats.hcNodes}`);
-
   if (prepared.skipped) {
-    append(lines);
-    append(lines, "NP-douce HC solver result:");
-    append(lines, `HC solver not run because ${prepared.skipReason}.`);
-    append(lines, "Raise the HC solve node limit if you want to force this reduced HC instance through the solver.");
-    append(lines);
     append(lines, "Final answer:");
     append(lines, `${answerLabel} answer inferred from HC: NOT COMPUTED`);
+    append(lines);
+    append(lines, "Run summary:");
+    append(lines, `estimated HC nodes after Vertex Cover gadget = ${prepared.stats.hcNodes}`);
+    append(lines, `HC solver not run because ${prepared.skipReason}.`);
     return { text: "", summary: "", totalTourCost: NaN, hamiltonianFound: false, notComputed: true };
   }
 
@@ -3676,16 +3648,6 @@ function runVertexCover(text) {
   const graph = buildDirectVertexCoverHcGraph(n, k, edges, padding);
 
   const lines = [];
-  append(lines, "Vertex Cover instance:");
-  append(lines, `vertices = ${n}`);
-  append(lines, `edges = ${edges.length}`);
-  append(lines, `k = ${k}`);
-  append(lines, `optional padding nodes = ${padding}`);
-  append(lines, `edge list = ${edges.map(([u, v]) => `(${u},${v})`).join(" ")}`);
-  append(lines);
-  append(lines, "Reduction used:");
-  append(lines, "Vertex Cover(G, k) -> direct 12-node edge gadgets -> Hamiltonian Cycle");
-  append(lines, "Gadget crosses: u1-v3, v1-u3, u6-v4, u4-v6.");
   appendDirectVertexCoverHcReduction(lines, graph, "Vertex Cover direct HC reduction", "Vertex Cover", "YES", "NO", () => {
     const limit = witnessDisplayLimit();
     const covers = collectVertexCovers(n, k, edges, limit);
@@ -3705,20 +3667,7 @@ function runClique(text) {
   const graph = vertexCoverK >= 0 ? buildDirectVertexCoverHcGraph(n, vertexCoverK, complementEdges, padding) : null;
 
   const lines = [];
-  append(lines, "Clique instance:");
-  append(lines, `vertices = ${n}`);
-  append(lines, `edges = ${edges.length}`);
-  append(lines, `k = ${k}`);
-  append(lines, `optional padding nodes = ${padding}`);
-  append(lines, `edge list = ${edges.map(([u, v]) => `(${u},${v})`).join(" ") || "(none)"}`);
-  append(lines);
-  append(lines, "Reduction used:");
-  append(lines, "Clique(G, k) -> Vertex Cover(complement(G), vertices - k) -> direct 12-node edge gadgets -> Hamiltonian Cycle");
-  append(lines, `complement graph edges = ${complementEdges.length}`);
-  append(lines, `vertex cover target on complement = ${vertexCoverK}`);
-
   if (!graph) {
-    append(lines);
     append(lines, "Final answer:");
     append(lines, "Clique answer: NO");
     append(lines, `k = ${k} is larger than the vertex count ${n}`);
@@ -3748,19 +3697,7 @@ function runIndependentSet(text) {
   const graph = vertexCoverK >= 0 ? buildDirectVertexCoverHcGraph(n, vertexCoverK, edges, padding) : null;
 
   const lines = [];
-  append(lines, "Independent Set instance:");
-  append(lines, `vertices = ${n}`);
-  append(lines, `edges = ${edges.length}`);
-  append(lines, `k = ${k}`);
-  append(lines, `optional padding nodes = ${padding}`);
-  append(lines, `edge list = ${edges.map(([u, v]) => `(${u},${v})`).join(" ") || "(none)"}`);
-  append(lines);
-  append(lines, "Reduction used:");
-  append(lines, "Independent Set(G, k) -> Vertex Cover(G, vertices - k) -> direct 12-node edge gadgets -> Hamiltonian Cycle");
-  append(lines, `vertex cover target = ${vertexCoverK}`);
-
   if (!graph) {
-    append(lines);
     append(lines, "Final answer:");
     append(lines, "Independent Set answer: NO");
     append(lines, `k = ${k} is larger than the vertex count ${n}`);
@@ -3790,23 +3727,6 @@ function runSetCover(text) {
   const prepared = prepareSatViaVertexCoverForHc(sat, padding);
 
   const lines = [];
-  append(lines, "Set Cover instance:");
-  append(lines, `universe elements = ${universeSize}`);
-  append(lines, `sets = ${setCount}`);
-  append(lines, `k = ${k}`);
-  append(lines, `optional padding nodes = ${padding}`);
-  append(lines, "sets:");
-  sets.forEach((set, index) => append(lines, `S${index + 1} = { ${set.join(", ")} }`));
-  append(lines);
-  append(lines, "Reduction used:");
-  append(lines, "Set Cover -> 3-SAT coverage clauses plus at-most-k -> classic Vertex Cover -> direct Hamiltonian Cycle");
-  append(lines, `one Boolean variable per set before auxiliary variables = ${setCount}`);
-  append(lines);
-  append(lines, "3-SAT encoding:");
-  append(lines, `cardinality encoding = ${sat.encoding}`);
-  append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `variables before simplification = ${sat.variableCount}`);
-  append(lines, `3-SAT clauses before simplification = ${sat.clauses.length}`);
   appendSatViaVertexCoverHcReduction(lines, prepared, "Set Cover via 3-SAT -> Vertex Cover -> direct HC", "Set Cover", "YES", "NO", () => {
     const limit = witnessDisplayLimit();
     const covers = collectSetCovers(universeSize, k, sets, limit);
@@ -3826,23 +3746,6 @@ function runX3c(text) {
   const targetSetCount = universeSize % 3 === 0 ? universeSize / 3 : "not integral";
 
   const lines = [];
-  append(lines, "X3C instance:");
-  append(lines, `universe elements = ${universeSize}`);
-  append(lines, `3-sets = ${setCount}`);
-  append(lines, `target selected sets = ${targetSetCount}`);
-  append(lines, `optional padding nodes = ${padding}`);
-  append(lines, "sets:");
-  sets.forEach((set, index) => append(lines, `S${index + 1} = { ${set.join(", ")} }`));
-  append(lines);
-  append(lines, "Reduction used:");
-  append(lines, "X3C -> 3-SAT exactly-once coverage clauses -> classic Vertex Cover -> direct Hamiltonian Cycle");
-  append(lines, `one Boolean variable per 3-set before auxiliary variables = ${setCount}`);
-  append(lines);
-  append(lines, "3-SAT encoding:");
-  append(lines, `encoding = ${sat.encoding}`);
-  append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `variables before simplification = ${sat.variableCount}`);
-  append(lines, `3-SAT clauses before simplification = ${sat.clauses.length}`);
   appendSatViaVertexCoverHcReduction(lines, prepared, "X3C via 3-SAT -> Vertex Cover -> direct HC", "X3C", "YES", "NO", () => {
     const limit = witnessDisplayLimit();
     const exactCovers = collectX3cCovers(universeSize, sets, limit);
@@ -3866,23 +3769,6 @@ function runGraphColoring(text) {
   const prepared = prepareSatViaVertexCoverForHc(sat, padding);
 
   const lines = [];
-  append(lines, "Graph Coloring instance:");
-  append(lines, `vertices = ${n}`);
-  append(lines, `declared edges = ${declaredEdgeCount}`);
-  append(lines, `unique edges used = ${edges.length}`);
-  append(lines, `colors requested = ${colorCount}`);
-  append(lines, `optional padding nodes = ${padding}`);
-  append(lines, `edge list = ${edges.map(([u, v]) => `(${u},${v})`).join(" ") || "(none)"}`);
-  append(lines);
-  append(lines, "Reduction used:");
-  append(lines, "Graph Coloring -> 3-SAT color clauses -> classic Vertex Cover -> direct Hamiltonian Cycle");
-  append(lines, `${colorCount} Boolean color variables per vertex`);
-  append(lines);
-  append(lines, "3-SAT encoding:");
-  append(lines, `encoding = ${sat.encoding}`);
-  append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `variables before simplification = ${sat.variableCount}`);
-  append(lines, `3-SAT clauses before simplification = ${sat.clauses.length}`);
   appendSatViaVertexCoverHcReduction(lines, prepared, "Graph Coloring via 3-SAT -> Vertex Cover -> direct HC", "Graph Coloring", "YES", "NO", () => {
     const limit = witnessDisplayLimit();
     const colorings = collectGraphColorings(n, colorCount, edges, limit);
@@ -3907,46 +3793,10 @@ function runSudoku() {
   let hc = null;
   let solution = null;
   const lines = [];
-  append(lines, "Sudoku instance:");
-  append(lines, `grid = ${puzzle.n} x ${puzzle.n}`);
-  append(lines, `box shape = ${puzzle.boxSize} x ${puzzle.boxSize}`);
-  append(lines, `allowed values = 1 through ${puzzle.n}`);
-  append(lines, `givens = ${puzzle.givens}`);
-  append(lines);
-  append(lines, "Original puzzle:");
-  append(lines, formatSudokuGrid(puzzle.grid, puzzle.symbols));
-  append(lines);
-  append(lines, "Exact Sudoku reduction:");
-  append(lines, "Sudoku -> exact cover style 3-SAT -> classic Vertex Cover -> direct Hamiltonian Cycle");
-  append(lines, `base placement variables = ${sat.baseVariableCount}`);
-  append(lines, `SAT variables before simplification = ${sat.variableCount}`);
-  append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `3-SAT clauses before simplification = ${compactMode ? sat.clauses.length : sat.clauseCount}`);
-  if (!compactMode) append(lines, "Large Sudoku mode: clauses are counted exactly without materializing the full clause list in memory.");
-  append(lines);
-  if (compactMode) {
-    appendSatSimplificationSummary(lines, prepared.simplified);
-  } else {
-    append(lines, "Exact unit-clause simplification before HC:");
-    append(lines, "not materialized for 25x25 mode, because building the full clause list would be too much memory for a browser or phone");
-  }
-  append(lines);
   if (compactMode && prepared.simplified.contradiction) {
-    append(lines, "NP-douce HC solver result:");
-    append(lines, "HC solver skipped because exact unit propagation already proved the Sudoku constraints impossible.");
-    append(lines);
     append(lines, "Final answer:");
     append(lines, "Sudoku answer inferred from HC: NO SOLUTION");
-  } else {
-    append(lines, "Classic 3-SAT -> Vertex Cover size:");
-    append(lines, `SAT variables sent to Vertex Cover = ${stats.variableCount}`);
-    append(lines, `SAT clauses sent to Vertex Cover = ${stats.clauseCount}`);
-    append(lines, `Vertex Cover vertices = ${stats.vertexCoverVertices}`);
-    append(lines, `Vertex Cover edges = ${stats.vertexCoverEdges}`);
-    append(lines, `Vertex Cover target k = ${stats.vertexCoverTarget}`);
-    append(lines, `estimated HC nodes after Vertex Cover gadget = ${stats.hcNodes}`);
   }
-  append(lines);
   if (compactMode && !prepared.simplified.contradiction && !prepared.skipped) {
     hc = appendDirectVertexCoverHcReduction(lines, prepared.graph, "Sudoku via 3-SAT -> Vertex Cover -> direct HC", "Sudoku", "SOLUTION EXISTS", "NO SOLUTION");
     if (hc.hamiltonianFound) {
@@ -3959,11 +3809,12 @@ function runSudoku() {
       }
     }
   } else if (!compactMode || !prepared.simplified.contradiction) {
-    append(lines, "NP-douce HC solver result:");
-    append(lines, `HC solver not run because ${stats.hcNodes} nodes is above the safety limit ${denseLimit}${compactMode ? "" : " or the Sudoku is in 25x25 large mode"}.`);
-    append(lines);
     append(lines, "Final answer:");
     append(lines, "Sudoku answer inferred from HC: NOT COMPUTED");
+    append(lines);
+    append(lines, "Run summary:");
+    append(lines, `estimated HC nodes after Vertex Cover gadget = ${stats.hcNodes}`);
+    append(lines, `HC solver not run because ${stats.hcNodes} nodes is above the safety limit ${denseLimit}${compactMode ? "" : " or the Sudoku is in 25x25 large mode"}.`);
   }
   return lines.join("\n");
 }
@@ -4367,81 +4218,21 @@ function addPackingBoxRow(defaults = {}) {
   tbody.appendChild(row);
 }
 
-function formatPackingPlacement(box) {
-  const endX = box.x + box.l;
-  const endY = box.y + box.w;
-  const endZ = box.z + box.h;
-  return `${box.id}: position (${formatNumber(box.x)}, ${formatNumber(box.y)}, ${formatNumber(box.z)}) -> (${formatNumber(endX)}, ${formatNumber(endY)}, ${formatNumber(endZ)}), size ${formatNumber(box.l)} x ${formatNumber(box.w)} x ${formatNumber(box.h)}, weight ${formatNumber(box.weight)}`;
-}
-
 function runPacking3d() {
   const input = readPackingInput();
   const packed = packBoxesExtremePoint(input);
   drawPackingScene(input.truck, packed.placed);
   const reduction = buildPackingCandidateReduction(input, packed);
   const prepared = prepareSatViaVertexCoverForHc(reduction, 0);
-  const truckVolume = input.truck.l * input.truck.w * input.truck.h;
-  const totalBoxVolume = packed.items.reduce((sum, item) => sum + item.volume, 0);
-  const totalBoxWeight = packed.items.reduce((sum, item) => sum + item.weight, 0);
   const lines = [];
-  append(lines, "3D Packing instance:");
-  append(lines, `truck = ${input.truck.l} x ${input.truck.w} x ${input.truck.h}`);
-  append(lines, `truck volume = ${formatNumber(truckVolume)}`);
-  append(lines, `max weight = ${formatNumber(input.truck.maxWeight)}`);
-  append(lines, `box types = ${input.types.length}`);
-  append(lines, `physical boxes = ${packed.items.length}`);
-  append(lines, `total box volume = ${formatNumber(totalBoxVolume)}`);
-  append(lines, `total box weight = ${formatNumber(totalBoxWeight)}`);
-  append(lines);
-  append(lines, "Practical packing answer:");
-  append(lines, `packed boxes = ${packed.placed.length}`);
-  append(lines, `unpacked boxes = ${packed.unpacked.length}`);
-  append(lines, `used volume = ${formatNumber(packed.usedVolume)} (${formatNumber((packed.usedVolume / truckVolume) * 100)}%)`);
-  append(lines, `loaded weight = ${formatNumber(packed.totalWeight)}`);
-  if (packed.unpacked.length) append(lines, `unpacked list = ${packed.unpacked.map(item => item.id).join(", ")}`);
-  append(lines);
-  append(lines, "Box placement manifest:");
-  append(lines, "Coordinates are (length, width, height). The first coordinate is the lower-back-left corner; the second is the upper-front-right corner.");
-  packed.placed
-    .slice()
-    .sort((a, b) => a.z - b.z || a.y - b.y || a.x - b.x || a.name.localeCompare(b.name) || a.copy - b.copy)
-    .forEach((box, index) => append(lines, `${index + 1}. ${formatPackingPlacement(box)}`));
-  if (packed.unpacked.length) {
-    append(lines);
-    append(lines, "Unpacked manifest:");
-    packed.unpacked.forEach((item, index) => {
-      append(lines, `${index + 1}. ${item.id}: original size ${formatNumber(item.l)} x ${formatNumber(item.w)} x ${formatNumber(item.h)}, weight ${formatNumber(item.weight)}`);
-    });
-  }
-  append(lines);
-  append(lines, "Candidate-placement reduction:");
-  append(lines, "Each candidate means one exact box orientation at one generated position. Clauses choose one placement per box and reject overlaps.");
-  append(lines, "Candidate 3-SAT -> classic Vertex Cover -> direct Hamiltonian Cycle.");
-  append(lines, `max packing options sent to HC = ${input.candidateBudget}`);
-  append(lines, `generated candidates = ${reduction.generatedCandidates}`);
-  append(lines, `kept candidates = ${reduction.keptCandidates}${reduction.pruned ? " (pruned for low nodes)" : ""}`);
-  append(lines, `SAT variables before simplification = ${reduction.variableCount}`);
-  append(lines, `CNF clauses before 3-literal normalization = ${reduction.rawClauseCount}`);
-  append(lines, `3-SAT clauses before simplification = ${reduction.clauses.length}`);
-  if (reduction.impossibleReasons.length) append(lines, `necessary impossibility check = ${reduction.impossibleReasons.join("; ")}`);
   appendSatViaVertexCoverHcReduction(lines, prepared, "3D packing via 3-SAT -> Vertex Cover -> direct HC", "Packing candidate model", "YES", "NO", () => {
     if (packed.placed.length === 0) return ["no packed box placements in the current candidate manifest"];
     return [
       `packed boxes = ${formatSet(packed.placed.map(box => box.id))}`,
-      "placement coordinates are listed in the Box placement manifest above"
+      `unpacked boxes = ${formatSet(packed.unpacked.map(item => item.id))}`
     ];
   });
-  append(lines, "The manifest above is a visual/practical placement guide; the YES/NO line comes from the HC solver.");
-  append(lines, "Higher max packing options send more possibilities into HC, creating more nodes and slower runs.");
   return lines.join("\n");
-}
-
-function literalText(literal) {
-  return literal < 0 ? `~x${-literal}` : `x${literal}`;
-}
-
-function formatFormula(clauses) {
-  return clauses.map(clause => `(${clause.map(literalText).join(" OR ")})`).join(" AND ");
 }
 
 function normalizeClauseLiterals(literals) {
@@ -4592,40 +4383,10 @@ function simplify3SatForHc(variableCount, clauses) {
   };
 }
 
-function forcedAssignmentText(assignment) {
-  const values = [];
-  for (let variable = 1; variable < assignment.length; variable++) {
-    if (assignment[variable] === 1) values.push(`x${variable}=true`);
-    if (assignment[variable] === -1) values.push(`x${variable}=false`);
-  }
-  return values.join(", ") || "(none)";
-}
-
-function appendSatSimplificationSummary(lines, simplified) {
-  append(lines, "Exact unit-clause simplification before HC:");
-  append(lines, `unit-forced assignments = ${simplified.forcedAssignments}`);
-  append(lines, `forced values = ${forcedAssignmentText(simplified.assignment)}`);
-  append(lines, `clauses removed as satisfied = ${simplified.satisfiedClauses}`);
-  append(lines, `tautology clauses removed = ${simplified.tautologyClauses}`);
-  append(lines, `clauses left after unit propagation = ${simplified.simplifiedClauseCount}`);
-  append(lines, `binary clauses kept without duplicate gadget ports = ${simplified.binaryExpandedClauses}`);
-  append(lines, `auxiliary variables added by simplification = ${simplified.auxiliaryVariablesAdded}`);
-  append(lines, `3-SAT clauses sent to HC = ${simplified.finalClauseCount}`);
-  if (simplified.contradiction) append(lines, `contradiction = ${simplified.contradictionReason}`);
-}
-
 function run3SatCompressed(text) {
   const { variableCount, clauseCount, padding, clauses } = parse3Sat(text);
   const prepared = prepareSatViaVertexCoverForHc({ variableCount, clauses }, padding);
   const lines = [];
-  append(lines, "3-SAT instance:");
-  append(lines, `variables = ${variableCount}`);
-  append(lines, `clauses = ${clauseCount}`);
-  append(lines, `optional padding nodes = ${padding}`);
-  append(lines, `Formula: ${formatFormula(clauses)}`);
-  append(lines);
-  append(lines, "Reduction used:");
-  append(lines, "3-SAT -> classic Vertex Cover clause triangles -> direct Hamiltonian Cycle");
   appendSatViaVertexCoverHcReduction(lines, prepared, "3-SAT via classic Vertex Cover HC reduction", "Original 3-SAT", "SATISFIABLE", "UNSATISFIABLE", () => {
     const limit = witnessDisplayLimit();
     const assignments = collectSatisfyingAssignments(variableCount, clauses, limit);
@@ -4638,34 +4399,6 @@ function run3SatCompressed(text) {
     ];
   });
   return lines.join("\n");
-}
-
-function findDegreeTwoForcedEdges(edge, n) {
-  const forcedEdge = new Set();
-  let forcedEdgeCount = 0;
-  let forcedVertexCount = 0;
-  let forcedEdgeTotal = 0;
-
-  for (let vertex = 1; vertex <= n; vertex++) {
-    const neighbors = [];
-    for (let neighbor = 1; neighbor <= n; neighbor++) {
-      if (vertex !== neighbor && edge[vertex][neighbor] !== 0) neighbors.push(neighbor);
-    }
-    if (neighbors.length !== 2) continue;
-
-    forcedVertexCount += 1;
-    for (const neighbor of neighbors) {
-      const a = Math.min(vertex, neighbor);
-      const b = Math.max(vertex, neighbor);
-      const key = `${a}:${b}`;
-      if (forcedEdge.has(key)) continue;
-      forcedEdge.add(key);
-      forcedEdgeCount += 1;
-      forcedEdgeTotal += edge[vertex][neighbor];
-    }
-  }
-
-  return { forcedVertexCount, forcedEdgeCount, forcedEdgeTotal };
 }
 
 async function loadFileInto(fileInput, textareaId) {

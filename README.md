@@ -1,4 +1,4 @@
-# NP-douce
+# NP-douce 1.0
 
 Open `index.html` in a browser to run the app.
 
@@ -32,7 +32,7 @@ Reduction tabs now use this strict flow for their displayed answer:
 original problem -> reduction -> HC graph -> NP-douce HC solver -> inferred original answer
 ```
 
-When the HC solver returns YES, reduction tabs print concrete original-problem witnesses, such as SAT assignments, vertex covers, cliques, independent sets, selected sets, colorings, Sudoku grids, or packing placement summaries. The displayed witness count is capped by `HC backtrack tries`. The app screen is compacted to the final answer, witness lines, node counts, key run settings, and elapsed time instead of the full solver trace.
+When the HC solver returns YES, reduction tabs print concrete original-problem witnesses, such as SAT assignments, vertex covers, cliques, independent sets, selected sets, colorings, Sudoku grids, or packing placement summaries. The displayed witness count is capped by `HC backtrack tries`. The app screen is compacted to the final answer, witness lines, node counts, key run settings, and elapsed time instead of the full solver trace. Verbose preambles, hidden edge/formula manifests, and duplicate display-only prechecks are skipped so compact runs do less formatting work.
 
 If the reduced HC graph is above the app's `HC solve node limit`, the tab reports `NOT COMPUTED` instead of using a separate direct solver. Raise the limit when you want to force a larger reduced HC instance through the solver, but large values can run very slowly.
 
