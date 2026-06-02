@@ -55,6 +55,43 @@ function buildSquaredEdgeMatrix(edge, n) {
   return edgeSquared;
 }
 
+function buildNonzeroEdgeList(edge, n) {
+  const edgeList = [];
+  for (let i = 1; i < n; i++) {
+    for (let j = i + 1; j <= n; j++) {
+      const weight = edge[i][j];
+      if (weight === 0) continue;
+      edgeList.push({
+        from: i,
+        to: j,
+        weight,
+        weightSquared: weight * weight,
+        key: edgeKey(i, j)
+      });
+    }
+  }
+  return attachEdgeListAdjacency(edgeList, n);
+}
+
+function attachEdgeListAdjacency(edgeList, n) {
+  if (edgeList.adjacencyByVertex) return edgeList;
+  const adjacencyByVertex = Array.from({ length: n + 1 }, () => []);
+  for (const item of edgeList) {
+    adjacencyByVertex[item.from].push({ to: item.to, weight: item.weight });
+    adjacencyByVertex[item.to].push({ to: item.from, weight: item.weight });
+  }
+  Object.defineProperty(edgeList, "adjacencyByVertex", {
+    value: adjacencyByVertex,
+    enumerable: false,
+    configurable: true
+  });
+  return edgeList;
+}
+
+function numericEdgeKey(from, to, stride) {
+  return from < to ? (from * stride) + to : (to * stride) + from;
+}
+
 function computeTheoryMoments(edge, edgeSquared, n) {
   const moments = {
     meanTourLength: 0,
@@ -65,46 +102,28 @@ function computeTheoryMoments(edge, edgeSquared, n) {
   };
   const vertexCount = n;
   let edgeSum = 0;
+  const incidentEdges = Array.from({ length: n + 1 }, () => []);
   for (let i = 1; i < n; i++) {
-    for (let j = i + 1; j <= n; j++) edgeSum += edge[i][j];
+    for (let j = i + 1; j <= n; j++) {
+      const weight = edge[i][j];
+      edgeSum += weight;
+      moments.selfInteractionSum += edgeSquared[i][j];
+      if (weight === 0) continue;
+      incidentEdges[i].push(weight);
+      incidentEdges[j].push(weight);
+    }
   }
   moments.meanTourLength = (2.0 / (vertexCount - 1.0)) * edgeSum;
 
   for (let i = 1; i <= n; i++) {
-    for (let j = i + 1; j <= n; j++) moments.selfInteractionSum += edgeSquared[i][j];
-  }
-
-  const nonZeroEdges = [];
-  const incidentEdges = Array.from({ length: n + 1 }, () => []);
-  for (let i = 1; i <= n; i++) {
-    for (let j = i + 1; j <= n; j++) {
-      const weight = edge[i][j];
-      if (weight === 0) continue;
-      nonZeroEdges.push({ from: i, to: j, weight });
-      incidentEdges[i].push({ from: i, to: j, weight });
-      incidentEdges[j].push({ from: j, to: i, weight });
-    }
-  }
-
-  for (let i = 1; i <= n; i++) {
     for (let first = 0; first < incidentEdges[i].length; first++) {
       for (let second = first + 1; second < incidentEdges[i].length; second++) {
-        moments.neighborInteractionSum += incidentEdges[i][first].weight * incidentEdges[i][second].weight;
+        moments.neighborInteractionSum += incidentEdges[i][first] * incidentEdges[i][second];
       }
     }
   }
-
-  for (let first = 0; first < nonZeroEdges.length; first++) {
-    const firstEdge = nonZeroEdges[first];
-    for (let second = first + 1; second < nonZeroEdges.length; second++) {
-      const secondEdge = nonZeroEdges[second];
-      if (firstEdge.from === secondEdge.from || firstEdge.from === secondEdge.to ||
-          firstEdge.to === secondEdge.from || firstEdge.to === secondEdge.to) {
-        continue;
-      }
-      moments.disjointInteractionSum += firstEdge.weight * secondEdge.weight;
-    }
-  }
+  const allEdgePairProduct = ((edgeSum * edgeSum) - moments.selfInteractionSum) * 0.5;
+  moments.disjointInteractionSum = allEdgePairProduct - moments.neighborInteractionSum;
 
   moments.tourVariance =
     ((2.0 / (vertexCount - 1.0)) * moments.selfInteractionSum) +
@@ -115,13 +134,57 @@ function computeTheoryMoments(edge, edgeSquared, n) {
   return moments;
 }
 
+function computeTheoryMomentsFromEdgeList(edgeList, n) {
+  const moments = {
+    meanTourLength: 0,
+    selfInteractionSum: 0,
+    neighborInteractionSum: 0,
+    disjointInteractionSum: 0,
+    tourVariance: 0
+  };
+  const vertexCount = n;
+  let edgeSum = 0;
+  const incidentEdges = Array.from({ length: n + 1 }, () => []);
+  for (const item of edgeList) {
+    const weight = item.weight;
+    edgeSum += weight;
+    moments.selfInteractionSum += item.weightSquared;
+    if (weight === 0) continue;
+    incidentEdges[item.from].push(weight);
+    incidentEdges[item.to].push(weight);
+  }
+  moments.meanTourLength = (2.0 / (vertexCount - 1.0)) * edgeSum;
+
+  for (let i = 1; i <= n; i++) {
+    for (let first = 0; first < incidentEdges[i].length; first++) {
+      for (let second = first + 1; second < incidentEdges[i].length; second++) {
+        moments.neighborInteractionSum += incidentEdges[i][first] * incidentEdges[i][second];
+      }
+    }
+  }
+  const allEdgePairProduct = ((edgeSum * edgeSum) - moments.selfInteractionSum) * 0.5;
+  moments.disjointInteractionSum = allEdgePairProduct - moments.neighborInteractionSum;
+
+  moments.tourVariance =
+    ((2.0 / (vertexCount - 1.0)) * moments.selfInteractionSum) +
+    ((4.0 / ((vertexCount - 1.0) * (vertexCount - 2.0))) *
+      (moments.neighborInteractionSum + (2.0 * moments.disjointInteractionSum))) -
+    (moments.meanTourLength * moments.meanTourLength);
+
+  return moments;
+}
+
+function pairProductFromSumAndSquares(sum, squareSum) {
+  return ((sum * sum) - squareSum) * 0.5;
+}
+
 function collectAvailableVertices(endpointLink, n) {
   const values = [];
   for (let i = 1; i <= n; i++) if (endpointLink[i] !== -1) values.push(i);
   return values;
 }
 
-function accumulateRemainingEdgeBuckets(availableVertices, endpointLink, edge, edgeSquared) {
+function accumulateRemainingEdgeBuckets(availableVertices, endpointLink, edge, edgeSquared, edgeList = null) {
   const buckets = {
     activeFreeSum: 0,
     activeActiveOpenSum: 0,
@@ -139,6 +202,29 @@ function accumulateRemainingEdgeBuckets(availableVertices, endpointLink, edge, e
     activeFreeFreeTouchingPairSum: 0,
     activeFreeFreeDisjointPairSum: 0
   };
+
+  if (edgeList) {
+    for (const item of edgeList) {
+      const y = item.from;
+      const z = item.to;
+      const yLink = endpointLink[y];
+      const zLink = endpointLink[z];
+      if (yLink === -1 || zLink === -1) continue;
+      if ((yLink === 0 && zLink !== 0) || (yLink !== 0 && zLink === 0)) {
+        buckets.activeFreeSum += item.weight;
+        buckets.activeFreeSquareSum += item.weightSquared;
+      }
+      if (yLink !== 0 && zLink !== 0 && yLink !== z && zLink !== y) {
+        buckets.activeActiveOpenSum += item.weight;
+        buckets.activeActiveOpenSquareSum += item.weightSquared;
+      }
+      if (yLink === 0 && zLink === 0) {
+        buckets.freeFreeSum += item.weight;
+        buckets.freeFreeSquareSum += item.weightSquared;
+      }
+    }
+    return buckets;
+  }
 
   for (let a = 0; a < availableVertices.length; a++) {
     const y = availableVertices[a];
@@ -164,77 +250,148 @@ function accumulateRemainingEdgeBuckets(availableVertices, endpointLink, edge, e
   return buckets;
 }
 
-function accumulateVarianceBuckets(availableVertices, endpointLink, edge, buckets) {
-  const remainingEdges = [];
-  for (let fromIndex = 0; fromIndex < availableVertices.length; fromIndex++) {
-    const from = availableVertices[fromIndex];
-    const fromLink = endpointLink[from];
-    for (let toIndex = fromIndex + 1; toIndex < availableVertices.length; toIndex++) {
-      const to = availableVertices[toIndex];
+function accumulateVarianceBuckets(availableVertices, endpointLink, edge, buckets, edgeList = null) {
+  const vertexCapacity = endpointLink.length;
+  const activeFreeByActive = Array(vertexCapacity).fill(0);
+  const activeFreeSquareByActive = Array(vertexCapacity).fill(0);
+  const activeFreeByFree = Array(vertexCapacity).fill(0);
+  const activeFreeSquareByFree = Array(vertexCapacity).fill(0);
+  const freeFreeByFree = Array(vertexCapacity).fill(0);
+  const freeFreeSquareByFree = Array(vertexCapacity).fill(0);
+  const activeActiveByActive = Array(vertexCapacity).fill(0);
+  const activeActiveSquareByActive = Array(vertexCapacity).fill(0);
+  let activeActiveComplementPairDoubleSum = 0;
+  const activeActiveEdgeWeights = new Map();
+  const adjacencyByVertex = edgeList ? edgeList.adjacencyByVertex : null;
+
+  if (edgeList) {
+    for (const item of edgeList) {
+      const from = item.from;
+      const to = item.to;
+      const fromLink = endpointLink[from];
       const toLink = endpointLink[to];
-      if (fromLink === to || toLink === from) continue;
-      const weight = edge[from][to];
-      if (weight !== 0) remainingEdges.push({ from, to, fromLink, toLink, weight });
+      if (fromLink === -1 || toLink === -1 || fromLink === to || toLink === from) continue;
+      const weight = item.weight;
+      const weightSquared = item.weightSquared;
+
+      if ((fromLink === 0 && toLink !== 0) || (fromLink !== 0 && toLink === 0)) {
+        const active = fromLink !== 0 ? from : to;
+        const free = fromLink === 0 ? from : to;
+        activeFreeByActive[active] += weight;
+        activeFreeSquareByActive[active] += weightSquared;
+        activeFreeByFree[free] += weight;
+        activeFreeSquareByFree[free] += weightSquared;
+      } else if (fromLink === 0 && toLink === 0) {
+        freeFreeByFree[from] += weight;
+        freeFreeSquareByFree[from] += weightSquared;
+        freeFreeByFree[to] += weight;
+        freeFreeSquareByFree[to] += weightSquared;
+      } else {
+        activeActiveByActive[from] += weight;
+        activeActiveByActive[to] += weight;
+        activeActiveSquareByActive[from] += weightSquared;
+        activeActiveSquareByActive[to] += weightSquared;
+        activeActiveEdgeWeights.set(numericEdgeKey(from, to, vertexCapacity), weight);
+      }
+    }
+  } else {
+    for (let fromIndex = 0; fromIndex < availableVertices.length; fromIndex++) {
+      const from = availableVertices[fromIndex];
+      const fromLink = endpointLink[from];
+      for (let toIndex = fromIndex + 1; toIndex < availableVertices.length; toIndex++) {
+        const to = availableVertices[toIndex];
+        const toLink = endpointLink[to];
+        if (fromLink === to || toLink === from) continue;
+        const weight = edge[from][to];
+        const weightSquared = weight * weight;
+
+        if ((fromLink === 0 && toLink !== 0) || (fromLink !== 0 && toLink === 0)) {
+          const active = fromLink !== 0 ? from : to;
+          const free = fromLink === 0 ? from : to;
+          activeFreeByActive[active] += weight;
+          activeFreeSquareByActive[active] += weightSquared;
+          activeFreeByFree[free] += weight;
+          activeFreeSquareByFree[free] += weightSquared;
+        } else if (fromLink === 0 && toLink === 0) {
+          freeFreeByFree[from] += weight;
+          freeFreeSquareByFree[from] += weightSquared;
+          freeFreeByFree[to] += weight;
+          freeFreeSquareByFree[to] += weightSquared;
+        } else {
+          activeActiveByActive[from] += weight;
+          activeActiveByActive[to] += weight;
+          activeActiveSquareByActive[from] += weightSquared;
+          activeActiveSquareByActive[to] += weightSquared;
+          if (weight !== 0) activeActiveEdgeWeights.set(numericEdgeKey(from, to, vertexCapacity), weight);
+        }
+      }
     }
   }
 
-  for (let firstIndex = 0; firstIndex < remainingEdges.length; firstIndex++) {
-    const first = remainingEdges[firstIndex];
-    for (let secondIndex = firstIndex + 1; secondIndex < remainingEdges.length; secondIndex++) {
-      const second = remainingEdges[secondIndex];
-      const c = first.from, g = first.to, p = second.from, k = second.to;
-      const cLink = first.fromLink, gLink = first.toLink;
-      const pLink = second.fromLink, kLink = second.toLink;
+  let activeFreeSameActivePairSum = 0;
+  let activeFreeSameFreePairSum = 0;
+  let activeFreeMateSameFreePairSum = 0;
+  let freeFreeTouchingPairSum = 0;
+  let activeFreeFreeTouchingPairSum = 0;
+  let mixedOpenSharedActivePairSum = 0;
+  let activeActiveSharedEndpointPairSum = 0;
+  for (const vertex of availableVertices) {
+    activeFreeSameActivePairSum += pairProductFromSumAndSquares(activeFreeByActive[vertex], activeFreeSquareByActive[vertex]);
+    activeFreeSameFreePairSum += pairProductFromSumAndSquares(activeFreeByFree[vertex], activeFreeSquareByFree[vertex]);
+    freeFreeTouchingPairSum += pairProductFromSumAndSquares(freeFreeByFree[vertex], freeFreeSquareByFree[vertex]);
+    activeFreeFreeTouchingPairSum += activeFreeByFree[vertex] * freeFreeByFree[vertex];
+    mixedOpenSharedActivePairSum += activeActiveByActive[vertex] * activeFreeByActive[vertex];
+    activeActiveSharedEndpointPairSum += pairProductFromSumAndSquares(activeActiveByActive[vertex], activeActiveSquareByActive[vertex]);
+  }
 
-      if ((cLink !== 0 && (k === c || p === c)) ||
-          (gLink !== 0 && (k === g || p === g))) continue;
-      if ((kLink !== 0 && (k === c || k === g)) ||
-          (pLink !== 0 && (p === c || p === g))) continue;
-      if ((cLink === p && g === k) || (cLink === k && g === p) ||
-          (gLink === p && c === k) || (gLink === k && c === p)) continue;
-      if ((kLink === c && g === p) || (kLink === g && c === p) ||
-          (pLink === c && g === k) || (pLink === g && c === k)) continue;
-      if ((cLink === p && gLink === k) || (cLink === k && gLink === p)) continue;
+  const freeVertices = [];
+  const activeMatePairs = [];
+  for (const vertex of availableVertices) {
+    const mate = endpointLink[vertex];
+    if (mate === 0) {
+      freeVertices.push(vertex);
+    } else if (mate > vertex && mate < vertexCapacity && endpointLink[mate] === vertex) {
+      activeMatePairs.push([vertex, mate]);
+    }
+  }
 
-      const product = first.weight * second.weight;
-      if (kLink !== 0 && pLink !== 0 && cLink !== 0 && gLink !== 0) {
-        buckets.activeActiveOpenPairSum += product;
+  if (adjacencyByVertex) {
+    for (const [active, mate] of activeMatePairs) {
+      for (const adjacent of adjacencyByVertex[active]) {
+        const free = adjacent.to;
+        if (endpointLink[free] !== 0) continue;
+        activeFreeMateSameFreePairSum += adjacent.weight * edge[mate][free];
       }
-      if ((cLink !== 0 && gLink === 0 && pLink !== 0 && kLink === 0 && g === k) ||
-          (cLink !== 0 && gLink === 0 && pLink === 0 && kLink !== 0 && g === p) ||
-          (cLink === 0 && gLink !== 0 && pLink !== 0 && kLink === 0 && c === k) ||
-          (cLink === 0 && gLink !== 0 && pLink === 0 && kLink !== 0 && c === p)) {
-        buckets.activeFreeTouchingPairSum += product;
-      }
-      if ((cLink !== 0 && gLink === 0 && pLink !== 0 && kLink === 0 && g !== k) ||
-          (cLink !== 0 && gLink === 0 && pLink === 0 && kLink !== 0 && g !== p) ||
-          (cLink === 0 && gLink !== 0 && pLink !== 0 && kLink === 0 && c !== k) ||
-          (cLink === 0 && gLink !== 0 && pLink === 0 && kLink !== 0 && c !== p)) {
-        buckets.activeFreeDisjointPairSum += product;
-      }
-      if (cLink === 0 && gLink === 0 && pLink === 0 && kLink === 0) {
-        if (c === k || c === p || g === k || g === p) buckets.freeFreeTouchingPairSum += product;
-        else buckets.freeFreeDisjointPairSum += product;
-      }
-      if ((cLink !== 0 && gLink !== 0 && pLink === 0 && kLink !== 0) ||
-          (cLink !== 0 && gLink !== 0 && pLink !== 0 && kLink === 0) ||
-          (cLink === 0 && gLink !== 0 && pLink !== 0 && kLink !== 0) ||
-          (cLink !== 0 && gLink === 0 && pLink !== 0 && kLink !== 0)) {
-        buckets.mixedOpenTouchingPairSum += product;
-      }
-      if ((cLink !== 0 && gLink !== 0 && pLink === 0 && kLink === 0) ||
-          (cLink === 0 && gLink === 0 && pLink !== 0 && kLink !== 0)) {
-        buckets.mixedOpenFreePairSum += product;
-      }
-      if ((cLink !== 0 && gLink === 0 && pLink === 0 && kLink === 0) ||
-          (cLink === 0 && gLink !== 0 && pLink === 0 && kLink === 0) ||
-          (cLink === 0 && gLink === 0 && pLink !== 0 && kLink === 0) ||
-          (cLink === 0 && gLink === 0 && pLink === 0 && kLink !== 0)) {
-        if (c === p || c === k || g === k || g === p) buckets.activeFreeFreeTouchingPairSum += product;
-        else buckets.activeFreeFreeDisjointPairSum += product;
+    }
+  } else {
+    for (const free of freeVertices) {
+      for (const [active, mate] of activeMatePairs) {
+        activeFreeMateSameFreePairSum += edge[active][free] * edge[mate][free];
       }
     }
   }
+
+  const activeFreePairSum = pairProductFromSumAndSquares(buckets.activeFreeSum, buckets.activeFreeSquareSum);
+  const freeFreePairSum = pairProductFromSumAndSquares(buckets.freeFreeSum, buckets.freeFreeSquareSum);
+  const activeActivePairSum = pairProductFromSumAndSquares(buckets.activeActiveOpenSum, buckets.activeActiveOpenSquareSum);
+  for (const [key, weight] of activeActiveEdgeWeights.entries()) {
+    const from = Math.floor(key / vertexCapacity);
+    const to = key % vertexCapacity;
+    const complementWeight = activeActiveEdgeWeights.get(numericEdgeKey(endpointLink[from], endpointLink[to], vertexCapacity));
+    if (complementWeight !== undefined) activeActiveComplementPairDoubleSum += weight * complementWeight;
+  }
+
+  buckets.activeFreeTouchingPairSum += activeFreeSameFreePairSum - activeFreeMateSameFreePairSum;
+  buckets.activeFreeDisjointPairSum += activeFreePairSum - activeFreeSameActivePairSum - activeFreeSameFreePairSum;
+  buckets.freeFreeTouchingPairSum += freeFreeTouchingPairSum;
+  buckets.freeFreeDisjointPairSum += freeFreePairSum - freeFreeTouchingPairSum;
+  buckets.mixedOpenTouchingPairSum += (buckets.activeActiveOpenSum * buckets.activeFreeSum) - mixedOpenSharedActivePairSum;
+  buckets.mixedOpenFreePairSum += buckets.activeActiveOpenSum * buckets.freeFreeSum;
+  buckets.activeFreeFreeTouchingPairSum += activeFreeFreeTouchingPairSum;
+  buckets.activeFreeFreeDisjointPairSum += (buckets.activeFreeSum * buckets.freeFreeSum) - activeFreeFreeTouchingPairSum;
+  buckets.activeActiveOpenPairSum += activeActivePairSum -
+    activeActiveSharedEndpointPairSum -
+    (0.5 * activeActiveComplementPairDoubleSum);
 }
 
 function applyChosenEdge(from, to, edge, endpointLink, state) {
@@ -278,6 +435,13 @@ function applyChosenEdge(from, to, edge, endpointLink, state) {
   return true;
 }
 
+function chosenEdgeKeySet(state) {
+  const keys = new Set();
+  if (!state.chosenEdges) return keys;
+  for (const chosen of state.chosenEdges) keys.add(edgeKey(chosen.from, chosen.to));
+  return keys;
+}
+
 function computeConditionedMeanTourLength(n, endpointLink, state, edge, buckets) {
   const remainingFactor = n - 1 + state.closedChains - state.usedVertices;
   if (remainingFactor === 0) {
@@ -316,11 +480,11 @@ function computeConditionedVariance(n, state, conditionedMeanTourLength, buckets
      (conditionedMeanTourLength - state.chosenEdgeTotal));
 }
 
-function computeConditionedStateStats(n, edge, edgeSquared, endpointLink, state) {
+function computeConditionedStateStats(n, edge, edgeSquared, endpointLink, state, edgeList = null) {
   const availableVertices = collectAvailableVertices(endpointLink, n);
-  const buckets = accumulateRemainingEdgeBuckets(availableVertices, endpointLink, edge, edgeSquared);
+  const buckets = accumulateRemainingEdgeBuckets(availableVertices, endpointLink, edge, edgeSquared, edgeList);
   const mean = computeConditionedMeanTourLength(n, endpointLink, state, edge, buckets);
-  accumulateVarianceBuckets(availableVertices, endpointLink, edge, buckets);
+  accumulateVarianceBuckets(availableVertices, endpointLink, edge, buckets, edgeList);
   const variance = computeConditionedVariance(n, state, mean, buckets);
   const remainingFactor = n - 1 + state.closedChains - state.usedVertices;
   const entropy = lnGamma(remainingFactor + 1.0) + (Math.log(2.0) * (state.closedChains - 1));
@@ -333,15 +497,64 @@ function computeConditionedStateStats(n, edge, edgeSquared, endpointLink, state)
   };
 }
 
-function adaptiveBetaForState(n, edge, edgeSquared, endpointLink, state, multiplier) {
-  const stats = computeConditionedStateStats(n, edge, edgeSquared, endpointLink, state);
+function adaptiveBetaForState(n, edge, edgeSquared, endpointLink, state, multiplier, edgeList = null) {
+  const stats = computeConditionedStateStats(n, edge, edgeSquared, endpointLink, state, edgeList);
   const beta = stats.variance > 1e-12 ? multiplier / Math.sqrt(stats.variance) : null;
   return { beta, stats };
 }
 
-function computeTheoryScore(n, edge, edgeSquared, endpointLink, state, beta) {
-  const stats = computeConditionedStateStats(n, edge, edgeSquared, endpointLink, state);
+function computeLogZFromStats(stats, beta) {
   return stats.entropy - (beta * stats.mean) + ((beta * beta) * 0.5 * stats.variance);
+}
+
+function computeTheoryScore(n, edge, edgeSquared, endpointLink, state, beta, edgeList = null) {
+  const stats = computeConditionedStateStats(n, edge, edgeSquared, endpointLink, state, edgeList);
+  return computeLogZFromStats(stats, beta);
+}
+
+function computeImportanceScore(currentStats, plusStats, beta) {
+  const plusLogZ = computeLogZFromStats(plusStats, beta);
+  const logOmegaRatio = plusStats.entropy - currentStats.entropy;
+  if (!Number.isFinite(logOmegaRatio)) return null;
+
+  if (logOmegaRatio >= -1e-12) {
+    return {
+      importance: Infinity,
+      plusLogZ,
+      minusLogZ: -Infinity,
+      omegaRatio: 1,
+      minusMean: NaN,
+      minusVariance: NaN
+    };
+  }
+
+  const omegaRatio = Math.exp(logOmegaRatio);
+  const minusWeight = -Math.expm1(logOmegaRatio);
+  if (!(minusWeight > 0) || !Number.isFinite(minusWeight)) return null;
+
+  const currentSecondMoment = currentStats.variance + (currentStats.mean * currentStats.mean);
+  const plusSecondMoment = plusStats.variance + (plusStats.mean * plusStats.mean);
+  const minusMean = (currentStats.mean - (omegaRatio * plusStats.mean)) / minusWeight;
+  const minusSecondMoment = (currentSecondMoment - (omegaRatio * plusSecondMoment)) / minusWeight;
+  let minusVariance = minusSecondMoment - (minusMean * minusMean);
+  if (minusVariance < 0 && minusVariance > -1e-9) minusVariance = 0;
+  if (!Number.isFinite(minusMean) || !Number.isFinite(minusVariance)) return null;
+  minusVariance = Math.max(0, minusVariance);
+
+  const minusStats = {
+    entropy: currentStats.entropy + Math.log(minusWeight),
+    mean: minusMean,
+    variance: minusVariance
+  };
+  const minusLogZ = computeLogZFromStats(minusStats, beta);
+  return {
+    importance: plusLogZ - minusLogZ,
+    plusLogZ,
+    minusLogZ,
+    omegaRatio,
+    minusMean,
+    minusVariance
+  };
 }
 
 function edgeKey(from, to) {
@@ -350,11 +563,33 @@ function edgeKey(from, to) {
   return `${a}:${b}`;
 }
 
-function collectCandidateEdges(n, edge, endpointLink, state, candidateEdgeKeys = null) {
+function collectCandidateEdges(n, edge, endpointLink, state, candidateEdgeKeys = null, candidateEdgeList = null) {
   const candidateEdges = [];
-  if (candidateEdgeKeys) {
+  if (candidateEdgeList) {
+    for (const item of candidateEdgeList) {
+      const from = item.from;
+      const to = item.to;
+      if (endpointLink[from] === -1 || endpointLink[to] === -1 ||
+          endpointLink[from] === to || endpointLink[to] === from ||
+          edge[from][to] === 0) {
+        continue;
+      }
+      candidateEdges.push({ from, to });
+    }
+  } else if (candidateEdgeKeys) {
     for (const key of candidateEdgeKeys) {
       const [from, to] = key.split(":").map(Number);
+      if (endpointLink[from] === -1 || endpointLink[to] === -1 ||
+          endpointLink[from] === to || endpointLink[to] === from ||
+          edge[from][to] === 0) {
+        continue;
+      }
+      candidateEdges.push({ from, to });
+    }
+  } else if (state.allowedEdges) {
+    for (const item of state.allowedEdges) {
+      const from = item.from;
+      const to = item.to;
       if (endpointLink[from] === -1 || endpointLink[to] === -1 ||
           endpointLink[from] === to || endpointLink[to] === from ||
           edge[from][to] === 0) {
@@ -395,25 +630,66 @@ function candidateClassInfo(endpointLink, from, to) {
   return { name: "chain-end/active-active", weight: 0.5 };
 }
 
+function scoreCandidateEdge(n, edge, edgeSquared, endpointLink, state, beta, candidate, currentStats, scoreMethod, momentEdgeList) {
+  const trialLinks = endpointLink.slice();
+  const trialState = { ...state, chosenEdges: null };
+  if (!applyChosenEdge(candidate.from, candidate.to, edge, trialLinks, trialState)) return null;
+  const classInfo = candidateClassInfo(endpointLink, candidate.from, candidate.to);
+  const plusStats = computeConditionedStateStats(n, edge, edgeSquared, trialLinks, trialState, momentEdgeList);
+  let plusLogZ = null;
+  let logScore = null;
+  let importanceInfo = null;
+  if (scoreMethod === "importance") {
+    importanceInfo = computeImportanceScore(currentStats, plusStats, beta);
+    if (!importanceInfo) return null;
+    plusLogZ = importanceInfo.plusLogZ;
+    logScore = importanceInfo.importance;
+  } else {
+    plusLogZ = computeLogZFromStats(plusStats, beta);
+    logScore = plusLogZ;
+  }
+  if (Number.isNaN(logScore) || logScore === -Infinity) return null;
+  return {
+    logScore,
+    plusLogZ,
+    importance: importanceInfo ? importanceInfo.importance : null,
+    minusLogZ: importanceInfo ? importanceInfo.minusLogZ : null,
+    omegaRatio: importanceInfo ? importanceInfo.omegaRatio : null,
+    scoreMethod,
+    from: candidate.from,
+    to: candidate.to,
+    className: classInfo.name,
+    classWeight: classInfo.weight
+  };
+}
+
 function rankScoringEdges(n, edge, edgeSquared, endpointLink, state, beta, candidateEdgeKeys = null, options = {}) {
   const ranked = [];
-  const candidateEdges = collectCandidateEdges(n, edge, endpointLink, state, candidateEdgeKeys);
+  const scoreMethod = options.scoreMethod === "importance" ? "importance" : "omega";
+  const momentEdgeList = options.momentEdgeList || null;
+  const candidateEdgeList = options.candidateEdgeList || null;
+  const currentStats = scoreMethod === "importance"
+    ? (options.currentStats || computeConditionedStateStats(n, edge, edgeSquared, endpointLink, state, momentEdgeList))
+    : null;
+  const candidateEdges = collectCandidateEdges(n, edge, endpointLink, state, candidateEdgeKeys, candidateEdgeList);
   for (const candidate of candidateEdges) {
-    const trialLinks = endpointLink.slice();
-    const trialState = { ...state, chosenEdges: null };
-    if (!applyChosenEdge(candidate.from, candidate.to, edge, trialLinks, trialState)) continue;
-    const classInfo = candidateClassInfo(endpointLink, candidate.from, candidate.to);
-    const logScore = computeTheoryScore(n, edge, edgeSquared, trialLinks, trialState, beta);
-    if (!Number.isFinite(logScore)) continue;
-    ranked.push({
-      logScore,
-      from: candidate.from,
-      to: candidate.to,
-      className: classInfo.name,
-      classWeight: classInfo.weight
-    });
+    const scored = scoreCandidateEdge(n, edge, edgeSquared, endpointLink, state, beta, candidate, currentStats, scoreMethod, momentEdgeList);
+    if (scored) ranked.push(scored);
   }
   if (ranked.length === 0) return ranked;
+
+  const infiniteWinners = ranked.filter(candidate => candidate.logScore === Infinity);
+  if (infiniteWinners.length > 0) {
+    for (const candidate of ranked) {
+      candidate.probability = candidate.logScore === Infinity ? 1 / infiniteWinners.length : 0;
+      candidate.score = candidate.probability;
+      candidate.omega = infiniteWinners.length;
+      candidate.logOmega = Infinity;
+      candidate.maxLogScore = Infinity;
+    }
+    ranked.sort((a, b) => b.probability - a.probability);
+    return ranked;
+  }
 
   const maxLogScore = Math.max(...ranked.map(candidate => candidate.logScore));
   let omega = 0;
@@ -438,13 +714,61 @@ function formatCandidateChoice(candidate) {
   const classText = candidate.className
     ? ` class ${candidate.className}`
     : "";
-  return `probability ${formatNumber(candidate.probability)} log-score ${formatNumber(candidate.logScore)}${classText}`;
+  const scoreText = candidate.scoreMethod === "importance"
+    ? `importance ${formatNumber(candidate.importance)} plus-lnZ ${formatNumber(candidate.plusLogZ)} minus-lnZ ${formatNumber(candidate.minusLogZ)}`
+    : `log-score ${formatNumber(candidate.logScore)}`;
+  return `probability ${formatNumber(candidate.probability)} ${scoreText}${classText}`;
 }
 
 function findBestScoringEdge(n, edge, edgeSquared, endpointLink, state, beta, candidateEdgeKeys = null, options = {}) {
-  const ranked = rankScoringEdges(n, edge, edgeSquared, endpointLink, state, beta, candidateEdgeKeys, options);
-  const best = ranked[0];
-  if (best) return best;
+  const scoreMethod = options.scoreMethod === "importance" ? "importance" : "omega";
+  const momentEdgeList = options.momentEdgeList || null;
+  const candidateEdgeList = options.candidateEdgeList || null;
+  const currentStats = scoreMethod === "importance"
+    ? (options.currentStats || computeConditionedStateStats(n, edge, edgeSquared, endpointLink, state, momentEdgeList))
+    : null;
+  const candidateEdges = collectCandidateEdges(n, edge, endpointLink, state, candidateEdgeKeys, candidateEdgeList);
+  let best = null;
+  let maxLogScore = -Infinity;
+  let omega = 0;
+  let infiniteWinners = 0;
+
+  for (const candidate of candidateEdges) {
+    const scored = scoreCandidateEdge(n, edge, edgeSquared, endpointLink, state, beta, candidate, currentStats, scoreMethod, momentEdgeList);
+    if (!scored) continue;
+
+    if (scored.logScore === Infinity) {
+      infiniteWinners += 1;
+      if (!best || best.logScore !== Infinity) best = scored;
+      continue;
+    }
+    if (infiniteWinners > 0) continue;
+
+    if (!best || scored.logScore > maxLogScore) {
+      omega = omega === 0 ? 1 : (omega * Math.exp(maxLogScore - scored.logScore)) + 1;
+      maxLogScore = scored.logScore;
+      best = scored;
+    } else {
+      omega += Math.exp(scored.logScore - maxLogScore);
+    }
+  }
+
+  if (best) {
+    if (best.logScore === Infinity) {
+      best.probability = 1 / infiniteWinners;
+      best.score = best.probability;
+      best.omega = infiniteWinners;
+      best.logOmega = Infinity;
+      best.maxLogScore = Infinity;
+    } else {
+      best.probability = Math.exp(best.logScore - maxLogScore) / omega;
+      best.score = best.probability;
+      best.omega = omega;
+      best.logOmega = maxLogScore + Math.log(omega);
+      best.maxLogScore = maxLogScore;
+    }
+    return best;
+  }
   return { score: 0, probability: 0, logScore: -Infinity, from: 0, to: 0 };
 }
 
@@ -725,10 +1049,89 @@ function repairTourWithTwoOpt(edge, n, selectedEdges, maxPasses) {
   };
 }
 
+function tourOrderToEdges(order, edge) {
+  if (!order || order.length === 0) return [];
+  const edges = [];
+  for (let index = 0; index < order.length; index++) {
+    const from = order[index];
+    const to = order[(index + 1) % order.length];
+    edges.push({ from, to, weight: edge[from][to] });
+  }
+  return edges;
+}
+
+function rotateOrderToSmallest(order) {
+  if (!order || order.length === 0) return [];
+  let smallestIndex = 0;
+  for (let index = 1; index < order.length; index++) {
+    if (order[index] < order[smallestIndex]) smallestIndex = index;
+  }
+  return order.slice(smallestIndex).concat(order.slice(0, smallestIndex));
+}
+
+function compareOrderLexicographic(left, right) {
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index++) {
+    if (left[index] !== right[index]) return left[index] - right[index];
+  }
+  return left.length - right.length;
+}
+
+function canonicalTourOrder(order) {
+  const forward = rotateOrderToSmallest(order);
+  const backward = rotateOrderToSmallest(order.slice().reverse());
+  return compareOrderLexicographic(forward, backward) <= 0 ? forward : backward;
+}
+
+function canonicalTourSignature(order) {
+  return canonicalTourOrder(order).join(":");
+}
+
+function chosenEdgesSignature(chosenEdges) {
+  if (!chosenEdges || chosenEdges.length === 0) return "";
+  return chosenEdges
+    .map(edge => edgeKey(edge.from, edge.to))
+    .sort()
+    .join("|");
+}
+
+function candidateTourSignature(candidate) {
+  if (candidate.tourOrder && candidate.tourOrder.length > 0) return canonicalTourSignature(candidate.tourOrder);
+  if (candidate.chosenEdges && candidate.chosenEdges.length > 0) return chosenEdgesSignature(candidate.chosenEdges);
+  return `branch:${candidate.exploredIndex}`;
+}
+
+function formatTourOrder(order) {
+  if (!order || order.length === 0) return "(no completed tour order)";
+  const canonical = canonicalTourOrder(order);
+  return `${canonical.join(" -> ")} -> ${canonical[0]}`;
+}
+
+function formatChosenEdgeList(chosenEdges) {
+  if (!chosenEdges || chosenEdges.length === 0) return "(no completed edge witness)";
+  return chosenEdges
+    .slice()
+    .sort((a, b) => Math.min(a.from, a.to) - Math.min(b.from, b.to) ||
+      Math.max(a.from, a.to) - Math.max(b.from, b.to))
+    .map(edge => `(${Math.min(edge.from, edge.to)},${Math.max(edge.from, edge.to)})`)
+    .join(" ");
+}
+
+function formatMinimumTourWitness(candidate, index) {
+  const costText = formatNumber(candidate.totalTourCost);
+  const branchText = Number.isFinite(candidate.exploredIndex) ? `branch ${candidate.exploredIndex}` : "branch ?";
+  if (candidate.tourOrder && candidate.tourOrder.length > 0) {
+    return `${index}. cost ${costText}, ${branchText}: ${formatTourOrder(candidate.tourOrder)}`;
+  }
+  return `${index}. cost ${costText}, ${branchText}: ${formatChosenEdgeList(candidate.chosenEdges)}`;
+}
+
 function cloneSolverState(state) {
   return {
     ...state,
-    chosenEdges: state.chosenEdges ? state.chosenEdges.slice() : []
+    chosenEdges: state.chosenEdges ? state.chosenEdges.slice() : [],
+    vcSelectedVertices: state.vcSelectedVertices ? new Set(state.vcSelectedVertices) : undefined,
+    vcRejectedVertices: state.vcRejectedVertices ? new Set(state.vcRejectedVertices) : undefined
   };
 }
 
@@ -737,19 +1140,31 @@ function remainingChoices(n, state) {
 }
 
 function resolveStepBeta(n, edge, edgeSquared, endpointLink, state, options, lastAdaptiveBeta) {
-  if (!options.adaptiveBeta) return { beta: options.effectiveBeta, lastAdaptiveBeta, standardDeviation: null };
-  const current = adaptiveBetaForState(n, edge, edgeSquared, endpointLink, state, options.betaMultiplier);
+  if (!options.adaptiveBeta) return { beta: options.effectiveBeta, lastAdaptiveBeta, standardDeviation: null, currentStats: null };
+  const current = adaptiveBetaForState(n, edge, edgeSquared, endpointLink, state, options.betaMultiplier, options.momentEdgeList || null);
   let nextBeta = lastAdaptiveBeta;
   if (current.beta !== null && Number.isFinite(current.beta)) nextBeta = current.beta;
   return {
     beta: nextBeta,
     lastAdaptiveBeta: nextBeta,
-    standardDeviation: current.stats.standardDeviation
+    standardDeviation: current.stats.standardDeviation,
+    currentStats: current.stats
   };
 }
 
 function finishTourFromState(edge, n, endpointLink, state, options) {
   const lines = [];
+  if (state.invalid) {
+    append(lines, `Solver branch stopped: ${state.invalidReason || "forced propagation contradiction"}`);
+    return {
+      lines,
+      totalTourCost: NaN,
+      partialTourCost: state.chosenEdgeTotal,
+      hamiltonianFound: false,
+      chosenEdges: state.chosenEdges ? state.chosenEdges.slice() : [],
+      tourOrder: null
+    };
+  }
   if (options.completeWithNeutralEdges && remainingChoices(n, state) > 0) {
     const completion = completeOpenTourWithNeutralEdges(edge, n, endpointLink, state);
     append(lines, "Neutral completion before repair:");
@@ -764,8 +1179,11 @@ function finishTourFromState(edge, n, endpointLink, state, options) {
   if (forced.exists) {
     append(lines, `The biggest probability is 1 at Edge[${forced.from}][${forced.to}].`);
     totalTourCost += forced.weight;
-    state.chosenEdges.push({ from: forced.from, to: forced.to, weight: forced.weight });
+    if (state.chosenEdges) state.chosenEdges.push({ from: forced.from, to: forced.to, weight: forced.weight });
   }
+  let chosenEdges = state.chosenEdges ? state.chosenEdges.slice() : [];
+  let builtTour = chosenEdges.length > 0 ? selectedEdgesToTourOrder(chosenEdges, n) : { valid: false };
+  let tourOrder = builtTour.valid ? builtTour.order.slice() : null;
 
   const repairPasses = Math.max(0, Math.floor(Number(options.repairPasses || 0)));
   if (repairPasses > 0) {
@@ -779,7 +1197,11 @@ function finishTourFromState(edge, n, endpointLink, state, options) {
       append(lines, `2-opt improvements = ${repair.twoOptImprovements}`);
       append(lines, `targeted 3-opt improvements = ${repair.threeOptImprovements}`);
       append(lines, `tour cost after repair = ${formatNumber(repair.totalTourCost)}`);
-      if (repair.totalTourCost < totalTourCost) totalTourCost = repair.totalTourCost;
+      if (repair.totalTourCost < totalTourCost) {
+        totalTourCost = repair.totalTourCost;
+        tourOrder = repair.order ? repair.order.slice() : tourOrder;
+        chosenEdges = tourOrder ? tourOrderToEdges(tourOrder, edge) : chosenEdges;
+      }
     } else {
       append(lines, `repair skipped = ${repair.reason}`);
     }
@@ -788,7 +1210,9 @@ function finishTourFromState(edge, n, endpointLink, state, options) {
   return {
     lines,
     totalTourCost,
-    hamiltonianFound: Math.abs(totalTourCost + n) < 1e-9
+    hamiltonianFound: Math.abs(totalTourCost + n) < 1e-9,
+    chosenEdges,
+    tourOrder
   };
 }
 
@@ -797,9 +1221,58 @@ function appendTraceLine(trace, line) {
   else trace.omitted += 1;
 }
 
+function scoreRegret(best, candidate) {
+  if (best.logScore === Infinity && candidate.logScore === Infinity) return 0;
+  if (best.logScore === Infinity) return Infinity;
+  const regret = best.logScore - candidate.logScore;
+  if (!Number.isFinite(regret)) return 0;
+  return Math.max(0, regret);
+}
+
+function countPotentialSearchEdges(edge, n, state) {
+  if (state.allowedEdgeKeys) return state.allowedEdgeKeys.size;
+  let count = 0;
+  for (let i = 1; i <= n - 1; i++) {
+    for (let j = i + 1; j <= n; j++) {
+      if (state.scoreZeroEdges || edge[i][j] !== 0) count++;
+    }
+  }
+  return count;
+}
+
+function selectSmartBacktrackAlternatives(ranked, maxAlternatives, options = {}) {
+  if (ranked.length <= 1 || maxAlternatives <= 0) return [];
+  const tolerance = Number.isFinite(options.smartBacktrackLogTolerance)
+    ? Math.max(0, options.smartBacktrackLogTolerance)
+    : 1e-9;
+  const probabilityTolerance = Number.isFinite(options.smartBacktrackProbabilityTolerance)
+    ? Math.max(0, options.smartBacktrackProbabilityTolerance)
+    : 1e-12;
+  const best = ranked[0];
+  const alternatives = [];
+
+  for (let optionIndex = 1; optionIndex < ranked.length && alternatives.length < maxAlternatives; optionIndex++) {
+    const candidate = ranked[optionIndex];
+    const regret = scoreRegret(best, candidate);
+    const probabilityGap = Math.abs(best.probability - candidate.probability);
+    if (regret <= tolerance || probabilityGap <= probabilityTolerance) {
+      alternatives.push({ candidate, optionIndex, regret });
+    }
+  }
+  for (let optionIndex = 1; optionIndex < ranked.length && alternatives.length < maxAlternatives; optionIndex++) {
+    if (alternatives.some(item => item.optionIndex === optionIndex)) continue;
+    const candidate = ranked[optionIndex];
+    alternatives.push({ candidate, optionIndex, regret: scoreRegret(best, candidate) });
+  }
+  return alternatives;
+}
+
 function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, rootState, searchOptions) {
-  const maxTries = Math.max(1, Math.floor(searchOptions.backtrackLimit));
+  const requestedTries = Math.max(1, Math.floor(searchOptions.backtrackLimit));
   const alternativesPerSplit = Math.max(1, Math.floor(searchOptions.alternativesPerSplit || 2));
+  const initialEdgeCount = countPotentialSearchEdges(edge, n, rootState);
+  const polynomialBranchCap = Math.max(1, Math.min(Number.MAX_SAFE_INTEGER, initialEdgeCount * initialEdgeCount));
+  const maxTries = Math.min(requestedTries, polynomialBranchCap);
   const queue = [{
     endpointLink: rootEndpointLink.slice(),
     state: cloneSolverState(rootState),
@@ -811,6 +1284,31 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
   let explored = 0;
   let queued = 1;
   let bestFinal = null;
+  let bestFinals = [];
+  let bestFinalSignatures = new Set();
+
+  const sameCost = (left, right) =>
+    Number.isFinite(left.totalTourCost) &&
+    Number.isFinite(right.totalTourCost) &&
+    Math.abs(left.totalTourCost - right.totalTourCost) <= 1e-9;
+  const isBetterFinal = (candidate, currentBest) => {
+    if (!currentBest) return true;
+    if (candidate.hamiltonianFound && !currentBest.hamiltonianFound) return true;
+    if (candidate.hamiltonianFound !== currentBest.hamiltonianFound) return false;
+    if (!Number.isFinite(candidate.totalTourCost)) return false;
+    if (!Number.isFinite(currentBest.totalTourCost)) return true;
+    return candidate.totalTourCost < currentBest.totalTourCost - 1e-9;
+  };
+  const isSameBestFinal = (candidate, currentBest) =>
+    currentBest &&
+    candidate.hamiltonianFound === currentBest.hamiltonianFound &&
+    sameCost(candidate, currentBest);
+  const rememberBestFinal = candidate => {
+    const signature = candidateTourSignature(candidate);
+    if (bestFinalSignatures.has(signature)) return;
+    bestFinalSignatures.add(signature);
+    bestFinals.push(candidate);
+  };
 
   while (queue.length > 0 && explored < maxTries) {
     queue.sort((a, b) => a.penalty - b.penalty);
@@ -826,21 +1324,25 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
         appendTraceLine(branch.trace, `current standard deviation = ${formatNumber(betaInfo.standardDeviation)} adaptive beta = ${formatNumber(betaInfo.beta)}`);
       }
 
-      const ranked = rankScoringEdges(n, edge, edgeSquared, branch.endpointLink, branch.state, betaInfo.beta, null, searchOptions);
+      const scoringOptions = betaInfo.currentStats
+        ? { ...searchOptions, currentStats: betaInfo.currentStats }
+        : searchOptions;
+      const ranked = rankScoringEdges(n, edge, edgeSquared, branch.endpointLink, branch.state, betaInfo.beta, null, scoringOptions);
       if (ranked.length === 0) {
         stoppedBecause = "no scored candidate edges";
         break;
       }
 
       const best = ranked[0];
-      const alternativeLimit = Math.min(alternativesPerSplit, ranked.length - 1);
-      for (let optionIndex = 1; optionIndex <= alternativeLimit; optionIndex++) {
-        const alternative = ranked[optionIndex];
+      const alternatives = selectSmartBacktrackAlternatives(ranked, alternativesPerSplit, searchOptions);
+      for (const alternativeInfo of alternatives) {
+        const alternative = alternativeInfo.candidate;
         const altEndpointLink = branch.endpointLink.slice();
         const altState = cloneSolverState(branch.state);
         if (!applyChosenEdge(alternative.from, alternative.to, edge, altEndpointLink, altState)) continue;
-        if (searchOptions.forceDegreeTwo) propagateDegreeTwoForcedEdges(edge, n, altEndpointLink, altState);
-        const regret = Math.max(0, best.logScore - alternative.logScore);
+        const altForced = propagateConfiguredForcedEdges(edge, n, altEndpointLink, altState, searchOptions);
+        if (altState.invalid) continue;
+        const regret = alternativeInfo.regret;
         const altTrace = {
           lines: branch.trace.lines.slice(),
           omitted: branch.trace.omitted
@@ -849,7 +1351,7 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
         queue.push({
           endpointLink: altEndpointLink,
           state: altState,
-          penalty: branch.penalty + regret + (optionIndex * 1e-9),
+          penalty: branch.penalty + regret + (alternativeInfo.optionIndex * 1e-9),
           lastAdaptiveBeta: betaInfo.lastAdaptiveBeta,
           trace: altTrace,
           label: `regret ${formatNumber(branch.penalty + regret)}`
@@ -866,10 +1368,14 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
         stoppedBecause = "chosen edge became invalid";
         break;
       }
-      if (searchOptions.forceDegreeTwo) {
-        const forcedAfterChoice = propagateDegreeTwoForcedEdges(edge, n, branch.endpointLink, branch.state);
+      if (searchOptions.forceDegreeTwo || searchOptions.vertexCoverPropagation) {
+        const forcedAfterChoice = propagateConfiguredForcedEdges(edge, n, branch.endpointLink, branch.state, searchOptions);
         if (forcedAfterChoice.forcedEdgeCount > 0) {
-          appendTraceLine(branch.trace, `Degree-2 propagation forced ${forcedAfterChoice.forcedEdgeCount} edges.`);
+          appendTraceLine(branch.trace, `Forced propagation added ${forcedAfterChoice.forcedEdgeCount} edges.`);
+        }
+        if (branch.state.invalid) {
+          stoppedBecause = branch.state.invalidReason || "forced propagation contradiction";
+          break;
         }
       }
       guard++;
@@ -887,22 +1393,35 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
       stoppedBecause,
       exploredIndex: explored
     };
-    if (!bestFinal ||
-        (candidate.hamiltonianFound && !bestFinal.hamiltonianFound) ||
-        (candidate.hamiltonianFound === bestFinal.hamiltonianFound && candidate.totalTourCost < bestFinal.totalTourCost)) {
+    if (isBetterFinal(candidate, bestFinal)) {
       bestFinal = candidate;
+      bestFinals = [];
+      bestFinalSignatures = new Set();
+      rememberBestFinal(candidate);
+    } else if (isSameBestFinal(candidate, bestFinal)) {
+      rememberBestFinal(candidate);
     }
-    if (candidate.hamiltonianFound) break;
   }
 
   const lines = [];
   append(lines, "Score-guided backtracking:");
   append(lines, `backtrack try limit = ${maxTries}`);
+  append(lines, `requested backtrack tries = ${requestedTries}`);
+  append(lines, `polynomial branch cap = ${polynomialBranchCap}`);
   append(lines, `branches explored = ${explored}`);
   append(lines, `branches queued = ${queued}`);
-  append(lines, `alternatives per split = ${alternativesPerSplit}`);
+  append(lines, `smart alternatives per split cap = ${alternativesPerSplit}`);
+  append(lines, `smart backtrack log tolerance = ${formatNumber(searchOptions.smartBacktrackLogTolerance ?? 1e-9)}`);
   append(lines, `best branch penalty = ${formatNumber(bestFinal ? bestFinal.penalty : 0)}`);
   append(lines, `best branch stopped because = ${bestFinal ? bestFinal.stoppedBecause : "none"}`);
+  if (bestFinal && Number.isFinite(bestFinal.totalTourCost)) {
+    append(lines, `minimum tour cost found = ${formatNumber(bestFinal.totalTourCost)}`);
+    append(lines, `distinct minimum tours found within try limit = ${bestFinals.length}`);
+    if (bestFinals.length > 1) {
+      append(lines, "Minimum tour witnesses:");
+      bestFinals.forEach((candidate, index) => append(lines, formatMinimumTourWitness(candidate, index + 1)));
+    }
+  }
   if (bestFinal) {
     append(lines, "Best branch trace:");
     bestFinal.trace.lines.forEach(line => append(lines, line));
@@ -911,11 +1430,12 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
     return {
       lines,
       totalTourCost: bestFinal.totalTourCost,
+      partialTourCost: bestFinal.totalTourCost,
       hamiltonianFound: bestFinal.hamiltonianFound
     };
   }
   append(lines, "No branch was completed.");
-  return { lines, totalTourCost: NaN, hamiltonianFound: false };
+  return { lines, totalTourCost: NaN, partialTourCost: NaN, hamiltonianFound: false };
 }
 
 function applyDegreeTwoForcedEdges(edge, n, endpointLink, state) {
@@ -932,9 +1452,7 @@ function applyDegreeTwoForcedEdges(edge, n, endpointLink, state) {
 
     let appliedForVertex = false;
     for (const neighbor of neighbors) {
-      const a = Math.min(vertex, neighbor);
-      const b = Math.max(vertex, neighbor);
-      const key = `${a}:${b}`;
+      const key = edgeKey(vertex, neighbor);
       if (tried.has(key)) continue;
       tried.add(key);
       if (applyChosenEdge(vertex, neighbor, edge, endpointLink, state)) {
@@ -945,11 +1463,20 @@ function applyDegreeTwoForcedEdges(edge, n, endpointLink, state) {
     if (appliedForVertex) forcedVertexCount += 1;
   }
 
-  return { forcedVertexCount, forcedEdgeCount, forcedEdgeTotal: state.chosenEdgeTotal };
+  return {
+    forcedVertexCount,
+    forcedEdgeCount,
+    forcedEdgeTotal: state.chosenEdgeTotal
+  };
 }
 
 function propagateDegreeTwoForcedEdges(edge, n, endpointLink, state) {
-  const total = { forcedVertexCount: 0, forcedEdgeCount: 0, forcedEdgeTotal: state.chosenEdgeTotal, passes: 0 };
+  const total = {
+    forcedVertexCount: 0,
+    forcedEdgeCount: 0,
+    forcedEdgeTotal: state.chosenEdgeTotal,
+    passes: 0
+  };
   while (true) {
     const beforeUsed = state.usedVertices;
     const beforeTotal = state.chosenEdgeTotal;
@@ -964,21 +1491,177 @@ function propagateDegreeTwoForcedEdges(edge, n, endpointLink, state) {
   return total;
 }
 
+function ensureVertexCoverPropagationState(state) {
+  if (!state.vcSelectedVertices) state.vcSelectedVertices = new Set();
+  if (!state.vcRejectedVertices) state.vcRejectedVertices = new Set();
+}
+
+function forceVertexCoverSelected(vertex, meta, edge, endpointLink, state, chosenKeys) {
+  ensureVertexCoverPropagationState(state);
+  const result = { selectedVertexCount: 0, forcedEdgeCount: 0 };
+  if (state.vcRejectedVertices.has(vertex)) {
+    state.invalid = true;
+    state.invalidReason = `Vertex Cover contradiction: vertex ${vertex} was both chosen and not chosen.`;
+    return result;
+  }
+  if (!state.vcSelectedVertices.has(vertex)) {
+    state.vcSelectedVertices.add(vertex);
+    result.selectedVertexCount += 1;
+  }
+
+  const connectors = meta.connectorEdgesByVertex[vertex] || [];
+  for (const connector of connectors) {
+    const key = edgeKey(connector.from, connector.to);
+    if (chosenKeys.has(key)) continue;
+    if (!applyChosenEdge(connector.from, connector.to, edge, endpointLink, state)) {
+      state.invalid = true;
+      state.invalidReason = `Vertex Cover propagation could not force connector Edge[${connector.from}][${connector.to}] for vertex ${vertex}.`;
+      return result;
+    }
+    chosenKeys.add(key);
+    result.forcedEdgeCount += 1;
+  }
+  return result;
+}
+
+function forceVertexCoverRejected(vertex, meta, edge, endpointLink, state, chosenKeys) {
+  ensureVertexCoverPropagationState(state);
+  const result = { rejectedVertexCount: 0, selectedVertexCount: 0, forcedEdgeCount: 0 };
+  if (state.vcSelectedVertices.has(vertex)) {
+    state.invalid = true;
+    state.invalidReason = `Vertex Cover contradiction: vertex ${vertex} was both chosen and not chosen.`;
+    return result;
+  }
+  if (!state.vcRejectedVertices.has(vertex)) {
+    state.vcRejectedVertices.add(vertex);
+    result.rejectedVertexCount += 1;
+  }
+
+  const neighbors = meta.neighborsByVertex[vertex] || [];
+  for (const neighbor of neighbors) {
+    const selected = forceVertexCoverSelected(neighbor, meta, edge, endpointLink, state, chosenKeys);
+    result.selectedVertexCount += selected.selectedVertexCount;
+    result.forcedEdgeCount += selected.forcedEdgeCount;
+    if (state.invalid) return result;
+  }
+  return result;
+}
+
+function applyVertexCoverGadgetPropagation(edge, n, endpointLink, state, meta) {
+  const total = {
+    selectedVertexCount: 0,
+    rejectedVertexCount: 0,
+    forcedEdgeCount: 0
+  };
+  if (!meta) return total;
+  ensureVertexCoverPropagationState(state);
+  const chosenKeys = chosenEdgeKeySet(state);
+
+  for (const [key, vertex] of meta.selectedTriggerByEdgeKey.entries()) {
+    if (!chosenKeys.has(key)) continue;
+    const selected = forceVertexCoverSelected(vertex, meta, edge, endpointLink, state, chosenKeys);
+    total.selectedVertexCount += selected.selectedVertexCount;
+    total.forcedEdgeCount += selected.forcedEdgeCount;
+    if (state.invalid) return total;
+  }
+
+  for (const pattern of meta.rejectionPatterns) {
+    if (!chosenKeys.has(pattern.crossKeys[0]) || !chosenKeys.has(pattern.crossKeys[1])) continue;
+    const rejected = forceVertexCoverRejected(pattern.rejectedVertex, meta, edge, endpointLink, state, chosenKeys);
+    total.rejectedVertexCount += rejected.rejectedVertexCount;
+    total.selectedVertexCount += rejected.selectedVertexCount;
+    total.forcedEdgeCount += rejected.forcedEdgeCount;
+    if (state.invalid) return total;
+
+    const selected = forceVertexCoverSelected(pattern.coveringVertex, meta, edge, endpointLink, state, chosenKeys);
+    total.selectedVertexCount += selected.selectedVertexCount;
+    total.forcedEdgeCount += selected.forcedEdgeCount;
+    if (state.invalid) return total;
+  }
+
+  return total;
+}
+
+function propagateConfiguredForcedEdges(edge, n, endpointLink, state, options = {}) {
+  const total = {
+    degreeTwoVertexCount: 0,
+    degreeTwoForcedEdgeCount: 0,
+    vcSelectedVertexCount: 0,
+    vcRejectedVertexCount: 0,
+    vcForcedEdgeCount: 0,
+    forcedEdgeCount: 0,
+    forcedEdgeTotal: state.chosenEdgeTotal,
+    passes: 0
+  };
+
+  while (!state.invalid) {
+    const beforeChosen = state.chosenEdges ? state.chosenEdges.length : 0;
+    const beforeSelected = state.vcSelectedVertices ? state.vcSelectedVertices.size : 0;
+    const beforeRejected = state.vcRejectedVertices ? state.vcRejectedVertices.size : 0;
+
+    if (options.forceDegreeTwo) {
+      const forced = propagateDegreeTwoForcedEdges(edge, n, endpointLink, state);
+      total.degreeTwoVertexCount += forced.forcedVertexCount;
+      total.degreeTwoForcedEdgeCount += forced.forcedEdgeCount;
+    }
+
+    if (options.vertexCoverPropagation) {
+      const vc = applyVertexCoverGadgetPropagation(edge, n, endpointLink, state, options.vertexCoverPropagation);
+      total.vcSelectedVertexCount += vc.selectedVertexCount;
+      total.vcRejectedVertexCount += vc.rejectedVertexCount;
+      total.vcForcedEdgeCount += vc.forcedEdgeCount;
+    }
+
+    total.passes += 1;
+    total.forcedEdgeTotal = state.chosenEdgeTotal;
+    const afterChosen = state.chosenEdges ? state.chosenEdges.length : 0;
+    const afterSelected = state.vcSelectedVertices ? state.vcSelectedVertices.size : 0;
+    const afterRejected = state.vcRejectedVertices ? state.vcRejectedVertices.size : 0;
+    if (afterChosen === beforeChosen && afterSelected === beforeSelected && afterRejected === beforeRejected) break;
+    if (total.passes > n + 2) {
+      state.invalid = true;
+      state.invalidReason = "Forced-edge propagation exceeded the safety guard.";
+      break;
+    }
+  }
+
+  total.forcedEdgeCount = total.degreeTwoForcedEdgeCount + total.vcForcedEdgeCount;
+  return total;
+}
+
 function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
   if (n < 2) throw new Error("Need at least 2 vertices.");
   const lines = [];
-  const edgeSquared = buildSquaredEdgeMatrix(edge, n);
-  const moments = computeTheoryMoments(edge, edgeSquared, n);
-  const effectiveBeta = Number.isFinite(beta) ? beta : (1.0 / Math.sqrt(Math.max(Number.MIN_VALUE, moments.tourVariance)));
-  const adaptiveBeta = Boolean(options.adaptiveBeta);
-  const betaMultiplier = Number.isFinite(options.betaMultiplier) ? options.betaMultiplier : effectiveBeta;
+  if (!options.allowedEdges && options.allowedEdgeKeys) {
+    options.allowedEdges = Array.from(options.allowedEdgeKeys).map(key => {
+      const [from, to] = key.split(":").map(Number);
+      const weight = edge[from][to];
+      return { from, to, weight, weightSquared: weight * weight, key };
+    });
+    attachEdgeListAdjacency(options.allowedEdges, n);
+  }
+  if (options.allowedEdges) attachEdgeListAdjacency(options.allowedEdges, n);
+  const momentEdgeList = options.momentEdgeList || options.allowedEdges || buildNonzeroEdgeList(edge, n);
+  const candidateEdgeList = options.candidateEdgeList || options.allowedEdges || (options.scoreZeroEdges ? null : momentEdgeList);
+  if (momentEdgeList) attachEdgeListAdjacency(momentEdgeList, n);
+  if (candidateEdgeList) attachEdgeListAdjacency(candidateEdgeList, n);
+  options.momentEdgeList = momentEdgeList;
+  options.candidateEdgeList = candidateEdgeList;
+  const edgeSquared = null;
+  const moments = computeTheoryMomentsFromEdgeList(momentEdgeList, n);
+  const suggestedBeta = 1.0 / Math.sqrt(Math.max(Number.MIN_VALUE, moments.tourVariance));
+  const effectiveBeta = Number.isFinite(beta) ? beta : suggestedBeta;
+  const adaptiveBeta = options.adaptiveBeta !== false;
+  const betaMultiplier = Number.isFinite(options.betaMultiplier) ? options.betaMultiplier : 1;
+  const scoreMethod = "importance";
   append(lines, `Source: ${sourceLabel}`);
   append(lines, `n = ${n}`);
   append(lines, `the average  = ${formatNumber(moments.meanTourLength)}`);
   append(lines, `S_self ${formatNumber(moments.selfInteractionSum)} S_neighbor ${formatNumber(moments.neighborInteractionSum)} S_non_neighbor ${formatNumber(moments.disjointInteractionSum)}`);
   append(lines, `the standard deviation = ${formatNumber(moments.tourVariance)} ${formatNumber(Math.sqrt(Math.max(0, moments.tourVariance)))}`);
-  append(lines, `suggested beta value = ${formatNumber(1.0 / Math.sqrt(Math.max(Number.MIN_VALUE, moments.tourVariance)))}`);
-  append(lines, `adaptive beta = ${adaptiveBeta ? "on" : "off"}`);
+  append(lines, `suggested beta value = ${formatNumber(suggestedBeta)}`);
+  append(lines, `adaptive beta = ${adaptiveBeta ? "on (automatic)" : "off"}`);
+  append(lines, "score method = importance lnZ(force edge) - lnZ(forbid edge) (automatic)");
   const entropy = lnGamma(n) - Math.log(2.0);
   const partition = entropy - (effectiveBeta * moments.meanTourLength) + ((effectiveBeta * effectiveBeta) * 0.5 * moments.tourVariance);
   append(lines, `entropy ${formatNumber(entropy)} partition ${formatNumber(partition)}`);
@@ -986,16 +1669,23 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
   const endpointLink = Array(n + 1).fill(0);
   const state = { closedChains: 0, usedVertices: 0, chosenEdgeTotal: 0, chosenEdges: [] };
   if (options.allowedEdgeKeys) state.allowedEdgeKeys = options.allowedEdgeKeys;
+  if (options.allowedEdges) state.allowedEdges = options.allowedEdges;
   state.scoreZeroEdges = Boolean(options.scoreZeroEdges);
   let propagationAfterChoiceCount = 0;
   let propagationAfterChoiceEdges = 0;
-  if (options.forceDegreeTwo) {
-    const forced = propagateDegreeTwoForcedEdges(edge, n, endpointLink, state);
+  if (options.forceDegreeTwo || options.vertexCoverPropagation) {
+    const forced = propagateConfiguredForcedEdges(edge, n, endpointLink, state, options);
     append(lines, "Degree-2 forced-edge precheck:");
-    append(lines, `vertices with exactly two edges applied = ${forced.forcedVertexCount}`);
-    append(lines, `forced edges applied = ${forced.forcedEdgeCount}`);
+    append(lines, `vertices with exactly two edges applied = ${forced.degreeTwoVertexCount}`);
+    append(lines, `forced edges applied = ${forced.degreeTwoForcedEdgeCount}`);
     append(lines, `forced propagation passes = ${forced.passes}`);
     append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
+    if (options.vertexCoverPropagation) {
+      append(lines, "Vertex Cover gadget consequence propagation:");
+      append(lines, `VC vertices forced chosen = ${forced.vcSelectedVertexCount}`);
+      append(lines, `VC vertices forced not chosen = ${forced.vcRejectedVertexCount}`);
+      append(lines, `VC connector edges forced = ${forced.vcForcedEdgeCount}`);
+    }
   }
   const backtrackLimit = Math.max(0, Math.floor(Number(options.backtrackLimit || 0)));
   if (backtrackLimit > 0) {
@@ -1005,13 +1695,22 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
       adaptiveBeta,
       betaMultiplier,
       backtrackLimit,
-      alternativesPerSplit: 2
+      alternativesPerSplit: 2,
+      smartBacktrackLogTolerance: 1e-9
     });
     search.lines.forEach(line => append(lines, line));
-    append(lines, `Total tour cost = ${formatNumber(search.totalTourCost)}`);
+    if (Number.isFinite(search.totalTourCost)) {
+      append(lines, `Total tour cost = ${formatNumber(search.totalTourCost)}`);
+    } else {
+      append(lines, "Total tour cost = no completed tour");
+      if (Number.isFinite(search.partialTourCost)) {
+        append(lines, `Best partial tour cost = ${formatNumber(search.partialTourCost)}`);
+      }
+    }
     return {
       text: lines.join("\n"),
       totalTourCost: search.totalTourCost,
+      partialTourCost: search.partialTourCost,
       hamiltonianFound: search.hamiltonianFound,
       moments
     };
@@ -1019,26 +1718,37 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
   let totalTourCost = state.chosenEdgeTotal;
   let guard = 0;
   let lastAdaptiveBeta = effectiveBeta;
-  while (n - state.usedVertices + state.closedChains - 1 > 0) {
+  while (!state.invalid && n - state.usedVertices + state.closedChains - 1 > 0) {
     let stepBeta = effectiveBeta;
+    let currentStats = null;
     if (adaptiveBeta) {
-      const current = adaptiveBetaForState(n, edge, edgeSquared, endpointLink, state, betaMultiplier);
+      const current = adaptiveBetaForState(n, edge, edgeSquared, endpointLink, state, betaMultiplier, options.momentEdgeList);
       if (current.beta !== null && Number.isFinite(current.beta)) lastAdaptiveBeta = current.beta;
       stepBeta = lastAdaptiveBeta;
+      currentStats = current.stats;
       append(lines, `current standard deviation = ${formatNumber(current.stats.standardDeviation)} adaptive beta = ${formatNumber(stepBeta)}`);
     }
-    const best = findBestScoringEdge(n, edge, edgeSquared, endpointLink, state, stepBeta, null, options);
+    const scoringOptions = currentStats ? { ...options, currentStats } : options;
+    const best = findBestScoringEdge(n, edge, edgeSquared, endpointLink, state, stepBeta, null, scoringOptions);
     if (!best.from) break;
     append(lines, `The biggest probability is ${formatNumber(best.probability)} at Edge[${best.from}][${best.to}].`);
-    append(lines, `Taylor log-score = ${formatNumber(best.logScore)} normalized by omega = ${formatNumber(best.omega)} and log-omega = ${formatNumber(best.logOmega)}.`);
+    if (best.scoreMethod === "importance") {
+      append(lines, `Importance score = ${formatNumber(best.importance)} from plus lnZ ${formatNumber(best.plusLogZ)} minus lnZ ${formatNumber(best.minusLogZ)}; normalized by omega = ${formatNumber(best.omega)} and log-omega = ${formatNumber(best.logOmega)}.`);
+    } else {
+      append(lines, `Taylor log-score = ${formatNumber(best.logScore)} normalized by omega = ${formatNumber(best.omega)} and log-omega = ${formatNumber(best.logOmega)}.`);
+    }
     if (best.className) append(lines, `Edge class = ${best.className}.`);
     if (!applyChosenEdge(best.from, best.to, edge, endpointLink, state)) break;
-    if (options.forceDegreeTwo) {
-      const forcedAfterChoice = propagateDegreeTwoForcedEdges(edge, n, endpointLink, state);
+    if (options.forceDegreeTwo || options.vertexCoverPropagation) {
+      const forcedAfterChoice = propagateConfiguredForcedEdges(edge, n, endpointLink, state, options);
       if (forcedAfterChoice.forcedEdgeCount > 0) {
         propagationAfterChoiceCount += 1;
         propagationAfterChoiceEdges += forcedAfterChoice.forcedEdgeCount;
-        append(lines, `Degree-2 propagation after choice forced ${forcedAfterChoice.forcedEdgeCount} edges in ${forcedAfterChoice.passes} passes.`);
+        append(lines, `Forced propagation after choice added ${forcedAfterChoice.forcedEdgeCount} edges in ${forcedAfterChoice.passes} passes.`);
+        if (options.vertexCoverPropagation &&
+            (forcedAfterChoice.vcSelectedVertexCount > 0 || forcedAfterChoice.vcRejectedVertexCount > 0)) {
+          append(lines, `VC consequence: chosen vertices +${forcedAfterChoice.vcSelectedVertexCount}, not-chosen vertices +${forcedAfterChoice.vcRejectedVertexCount}, connector edges +${forcedAfterChoice.vcForcedEdgeCount}.`);
+        }
       }
     }
     guard++;
@@ -1062,7 +1772,15 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
 }
 
 function runTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
-  return solveTrackingSolver(edge, n, beta, sourceLabel, options).text;
+  const result = solveTrackingSolver(edge, n, beta, sourceLabel, options);
+  const lines = [];
+  append(lines, "Final answer:");
+  append(lines, result.hamiltonianFound ? "HC decision: HAMILTONIAN CYCLE FOUND" : "HC decision: HAMILTONIAN CYCLE NOT FOUND");
+  append(lines, `HC nodes = ${n}`);
+  append(lines, `HC backtrack tries = ${Math.max(0, Math.floor(Number(options.backtrackLimit || 0)))}`);
+  if (Number.isFinite(result.totalTourCost)) append(lines, `HC tour cost = ${formatNumber(result.totalTourCost)}`);
+  if (Number.isFinite(result.partialTourCost) && !Number.isFinite(result.totalTourCost)) append(lines, `HC best partial tour cost = ${formatNumber(result.partialTourCost)}`);
+  return lines.join("\n");
 }
 
 function getHcSolveNodeLimit() {
@@ -1074,16 +1792,15 @@ function getHcSolveNodeLimit() {
 }
 
 function getHcBetaMultiplier() {
-  const input = document.getElementById("hcBetaMultiplier");
-  if (!input) return 1;
-  const value = Number(input.value);
-  if (!Number.isFinite(value) || value <= 0) throw new Error("HC beta multiplier must be greater than 0.");
-  return value;
+  return 1;
+}
+
+function getHcScoreMethod() {
+  return "importance";
 }
 
 function getHcAdaptiveBeta() {
-  const input = document.getElementById("hcAdaptiveBeta");
-  return input ? input.checked : false;
+  return true;
 }
 
 function getHcRepairPasses() {
@@ -1096,7 +1813,7 @@ function getHcRepairPasses() {
 
 function getHcBacktrackTries() {
   const input = document.getElementById("hcBacktrackTries");
-  if (!input) return 0;
+  if (!input) return 25;
   const value = Number(input.value);
   if (!Number.isFinite(value) || value < 0) throw new Error("HC backtrack tries must be a nonnegative number.");
   return Math.floor(value);
@@ -1104,6 +1821,7 @@ function getHcBacktrackTries() {
 
 function runCompressedHcDecision(graph, sourceLabel) {
   const limit = getHcSolveNodeLimit();
+  const backtrackTries = getHcBacktrackTries();
   if (graph.n > limit) {
     const lines = [];
     append(lines, "NP-douce HC solver result:");
@@ -1111,28 +1829,40 @@ function runCompressedHcDecision(graph, sourceLabel) {
     append(lines, "Raise the HC solve node limit if you want to force this reduced HC instance through the solver.");
     return { text: "", summary: lines.join("\n"), totalTourCost: NaN, hamiltonianFound: false, notComputed: true };
   }
-  const baseEdgeSquared = buildSquaredEdgeMatrix(graph.edge, graph.n);
-  const baseMoments = computeTheoryMoments(graph.edge, baseEdgeSquared, graph.n);
+  const graphEdgeList = graph.allowedEdges || buildNonzeroEdgeList(graph.edge, graph.n);
+  const baseMoments = computeTheoryMomentsFromEdgeList(graphEdgeList, graph.n);
   const suggestedBeta = 1.0 / Math.sqrt(Math.max(Number.MIN_VALUE, baseMoments.tourVariance));
-  const multiplier = getHcBetaMultiplier();
-  const beta = suggestedBeta * multiplier;
-  const result = solveTrackingSolver(graph.edge, graph.n, beta, `${sourceLabel} beta x${formatNumber(multiplier)}`, {
+  const beta = suggestedBeta;
+  const result = solveTrackingSolver(graph.edge, graph.n, beta, sourceLabel, {
     forceDegreeTwo: true,
     allowedEdgeKeys: graph.allowedEdgeKeys || null,
+    allowedEdges: graph.allowedEdges || null,
+    momentEdgeList: graphEdgeList,
+    candidateEdgeList: graph.allowedEdges || graphEdgeList,
+    vertexCoverPropagation: graph.vertexCoverPropagation || null,
     repairPasses: getHcRepairPasses(),
-    backtrackLimit: getHcBacktrackTries(),
+    backtrackLimit: backtrackTries,
     completeWithNeutralEdges: true,
-    adaptiveBeta: getHcAdaptiveBeta(),
-    betaMultiplier: multiplier
+    adaptiveBeta: true,
+    betaMultiplier: 1,
+    scoreMethod: "importance"
   });
   const lines = [];
   append(lines, "NP-douce HC solver result:");
   if (graph.allowedEdgeKeys) append(lines, `allowed HC edges scored = ${graph.allowedEdgeKeys.size}`);
-  append(lines, `HC beta multiplier = x${formatNumber(multiplier)}`);
-  append(lines, `HC adaptive beta = ${getHcAdaptiveBeta() ? "on" : "off"}`);
-  append(lines, `HC backtrack tries = ${getHcBacktrackTries()}`);
+  if (graph.vertexCoverPropagation) append(lines, "VC gadget propagation = on");
+  append(lines, "HC score method = importance (automatic)");
+  append(lines, "HC adaptive beta = on (automatic)");
+  append(lines, `HC backtrack tries = ${backtrackTries}`);
   append(lines, `starting HC beta value = ${formatNumber(beta)}`);
-  append(lines, `HC tour cost = ${formatNumber(result.totalTourCost)}`);
+  if (Number.isFinite(result.totalTourCost)) {
+    append(lines, `HC tour cost = ${formatNumber(result.totalTourCost)}`);
+  } else {
+    append(lines, "HC tour cost = no completed tour");
+    if (Number.isFinite(result.partialTourCost)) {
+      append(lines, `HC best partial tour cost = ${formatNumber(result.partialTourCost)}`);
+    }
+  }
   append(lines, `HC target cost = ${formatNumber(-graph.n)}`);
   append(lines, result.hamiltonianFound ? "HC decision: HAMILTONIAN CYCLE FOUND" : "HC decision: HAMILTONIAN CYCLE NOT FOUND");
   append(lines);
@@ -1529,6 +2259,191 @@ function buildComplementEdges(n, edges) {
   return complement;
 }
 
+function normalizeUndirectedEdges(n, edges) {
+  const seen = new Set();
+  const normalized = [];
+  for (const edgePair of edges) {
+    let [u, v] = edgePair;
+    if (u > v) [u, v] = [v, u];
+    if (u < 1 || v < 1 || u > n || v > n || u === v) continue;
+    const key = `${u}:${v}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push([u, v]);
+  }
+  return normalized;
+}
+
+function buildYesTriangleGraph() {
+  const edge = makeMatrix(3);
+  const allowedEdgeKeys = new Set();
+  const allowedEdges = [];
+  const add = (from, to) => {
+    edge[from][to] = -1;
+    edge[to][from] = -1;
+    const key = edgeKey(from, to);
+    if (!allowedEdgeKeys.has(key)) {
+      allowedEdgeKeys.add(key);
+      allowedEdges.push({ from: Math.min(from, to), to: Math.max(from, to), weight: -1, weightSquared: 1, key });
+    }
+  };
+  add(1, 2);
+  add(2, 3);
+  add(3, 1);
+  attachEdgeListAdjacency(allowedEdges, 3);
+  return {
+    edge,
+    n: 3,
+    allowedEdgeKeys,
+    allowedEdges,
+    gadgetCount: 0,
+    selectorSlots: 0,
+    paddingNodes: 0,
+    directYes: true
+  };
+}
+
+function buildDirectVertexCoverHcGraph(vertexCount, coverLimit, edges, padding = 0) {
+  const normalizedEdges = normalizeUndirectedEdges(vertexCount, edges);
+  if (normalizedEdges.length === 0) return buildYesTriangleGraph();
+
+  const selectorSlots = Math.min(coverLimit, vertexCount);
+  let nextNode = 1;
+  const gadgetRows = [];
+  const incidentRows = Array.from({ length: vertexCount + 1 }, () => []);
+
+  for (let edgeIndex = 0; edgeIndex < normalizedEdges.length; edgeIndex++) {
+    const [u, v] = normalizedEdges[edgeIndex];
+    const uRow = Array.from({ length: 6 }, () => nextNode++);
+    const vRow = Array.from({ length: 6 }, () => nextNode++);
+    const uInfo = { vertex: u, edgeIndex, start: uRow[0], end: uRow[5], nodes: uRow };
+    const vInfo = { vertex: v, edgeIndex, start: vRow[0], end: vRow[5], nodes: vRow };
+    gadgetRows.push({ u, v, uRow, vRow, uInfo, vInfo });
+    incidentRows[u].push(uInfo);
+    incidentRows[v].push(vInfo);
+  }
+
+  const selectors = [];
+  for (let slot = 0; slot < selectorSlots; slot++) {
+    selectors.push({ entry: nextNode++, exit: nextNode++ });
+  }
+  const paddingNodes = Array.from({ length: Math.max(0, padding) }, () => nextNode++);
+  const totalNodes = nextNode - 1;
+  const edge = makeMatrix(totalNodes);
+  const allowedEdgeKeys = new Set();
+  const allowedEdges = [];
+  const decisionEdgeKeys = new Set();
+  const connectorEdgesByVertex = Array.from({ length: vertexCount + 1 }, () => []);
+  const neighborsByVertex = Array.from({ length: vertexCount + 1 }, () => new Set());
+  const selectedTriggerByEdgeKey = new Map();
+  const rejectionPatterns = [];
+
+  const add = (from, to, decision = false) => {
+    if (from === to) return "";
+    edge[from][to] = -1;
+    edge[to][from] = -1;
+    const key = edgeKey(from, to);
+    if (!allowedEdgeKeys.has(key)) {
+      allowedEdgeKeys.add(key);
+      allowedEdges.push({
+        from: Math.min(from, to),
+        to: Math.max(from, to),
+        weight: -1,
+        weightSquared: 1,
+        key
+      });
+    }
+    if (decision) decisionEdgeKeys.add(key);
+    return key;
+  };
+
+  for (const gadget of gadgetRows) {
+    neighborsByVertex[gadget.u].add(gadget.v);
+    neighborsByVertex[gadget.v].add(gadget.u);
+    for (let i = 0; i < 5; i++) {
+      add(gadget.uRow[i], gadget.uRow[i + 1]);
+      add(gadget.vRow[i], gadget.vRow[i + 1]);
+    }
+    const u1ToV3 = add(gadget.uRow[0], gadget.vRow[2], true);
+    const v1ToU3 = add(gadget.vRow[0], gadget.uRow[2], true);
+    const u6ToV4 = add(gadget.uRow[5], gadget.vRow[3], true);
+    const u4ToV6 = add(gadget.uRow[3], gadget.vRow[5], true);
+    rejectionPatterns.push({
+      rejectedVertex: gadget.v,
+      coveringVertex: gadget.u,
+      crossKeys: [u1ToV3, u6ToV4]
+    });
+    rejectionPatterns.push({
+      rejectedVertex: gadget.u,
+      coveringVertex: gadget.v,
+      crossKeys: [v1ToU3, u4ToV6]
+    });
+  }
+
+  const vertexPaths = [];
+  for (let vertex = 1; vertex <= vertexCount; vertex++) {
+    const rows = incidentRows[vertex].sort((a, b) => a.edgeIndex - b.edgeIndex);
+    if (rows.length === 0) continue;
+    for (let index = 0; index + 1 < rows.length; index++) {
+      const key = add(rows[index].end, rows[index + 1].start, true);
+      connectorEdgesByVertex[vertex].push({ from: rows[index].end, to: rows[index + 1].start, key });
+    }
+    vertexPaths.push({
+      vertex,
+      start: rows[0].start,
+      end: rows[rows.length - 1].end,
+      rowCount: rows.length
+    });
+  }
+
+  if (selectorSlots > 0) {
+    for (let slot = 0; slot < selectors.length; slot++) {
+      const selector = selectors[slot];
+      add(selector.entry, selector.exit, true);
+      for (const path of vertexPaths) {
+        add(selector.entry, path.start, true);
+        add(selector.entry, path.end, true);
+        add(selector.exit, path.start, true);
+        add(selector.exit, path.end, true);
+      }
+      if (slot + 1 < selectors.length) {
+        add(selector.exit, selectors[slot + 1].entry);
+      }
+    }
+    const lastExit = selectors[selectors.length - 1].exit;
+    const firstEntry = selectors[0].entry;
+    if (paddingNodes.length === 0) {
+      add(lastExit, firstEntry);
+    } else {
+      add(lastExit, paddingNodes[0]);
+      for (let index = 0; index + 1 < paddingNodes.length; index++) add(paddingNodes[index], paddingNodes[index + 1]);
+      add(paddingNodes[paddingNodes.length - 1], firstEntry);
+    }
+  }
+
+  attachEdgeListAdjacency(allowedEdges, totalNodes);
+  return {
+    edge,
+    n: totalNodes,
+    allowedEdgeKeys,
+    allowedEdges,
+    decisionEdgeKeys,
+    gadgetCount: normalizedEdges.length,
+    selectorSlots,
+    selectors,
+    paddingNodes: paddingNodes.length,
+    vertexPaths,
+    normalizedEdges,
+    vertexCoverPropagation: {
+      coverLimit,
+      connectorEdgesByVertex,
+      neighborsByVertex: neighborsByVertex.map(neighbors => Array.from(neighbors)),
+      selectedTriggerByEdgeKey,
+      rejectionPatterns
+    }
+  };
+}
+
 function findClique(n, k, edges) {
   if (k === 0) return [];
   if (k > n) return null;
@@ -1660,6 +2575,307 @@ function findGraphColoring(n, colorCount, edges) {
   }
 
   return search(0) ? color : null;
+}
+
+function witnessDisplayLimit() {
+  return Math.max(1, Math.floor(getHcBacktrackTries()));
+}
+
+function collectSatisfyingAssignments(variableCount, clauses, limit) {
+  const results = [];
+  const assignment = Array(variableCount + 1).fill(-1);
+
+  function search() {
+    if (results.length >= limit || !partialFormulaCanStillBeSatisfied(clauses, assignment)) return;
+    let variable = 0;
+    for (let i = 1; i <= variableCount; i++) {
+      if (assignment[i] === -1) {
+        variable = i;
+        break;
+      }
+    }
+    if (variable === 0) {
+      if (formulaIsSatisfied(clauses, assignment)) results.push(assignment.slice());
+      return;
+    }
+    assignment[variable] = 1;
+    search();
+    assignment[variable] = 0;
+    search();
+    assignment[variable] = -1;
+  }
+
+  search();
+  return results;
+}
+
+function collectVertexCovers(n, k, edges, limit) {
+  const chosen = Array(n + 1).fill(false);
+  const results = [];
+  const seen = new Set();
+
+  function uncoveredEdge() {
+    for (const [u, v] of edges) {
+      if (!chosen[u] && !chosen[v]) return [u, v];
+    }
+    return null;
+  }
+
+  function collect() {
+    const cover = [];
+    for (let vertex = 1; vertex <= n; vertex++) if (chosen[vertex]) cover.push(vertex);
+    const key = cover.join(":");
+    if (seen.has(key)) return;
+    seen.add(key);
+    results.push(cover);
+  }
+
+  function search(count) {
+    if (results.length >= limit || count > k) return;
+    const edge = uncoveredEdge();
+    if (!edge) {
+      collect();
+      return;
+    }
+
+    const [u, v] = edge;
+    chosen[u] = true;
+    search(count + 1);
+    chosen[u] = false;
+
+    chosen[v] = true;
+    search(count + 1);
+    chosen[v] = false;
+  }
+
+  search(0);
+  return results;
+}
+
+function collectCliques(n, k, edges, limit) {
+  if (k === 0) return [[]];
+  if (k > n) return [];
+  const adjacency = buildAdjacencyMatrix(n, edges);
+  const results = [];
+
+  function search(clique, candidates) {
+    if (results.length >= limit) return;
+    if (clique.length === k) {
+      results.push(clique.slice());
+      return;
+    }
+    while (candidates.length > 0 && results.length < limit) {
+      if (clique.length + candidates.length < k) return;
+      const vertex = candidates.shift();
+      const nextCandidates = candidates.filter(candidate => adjacency[vertex][candidate]);
+      search([...clique, vertex], nextCandidates);
+    }
+  }
+
+  search([], Array.from({ length: n }, (_, index) => index + 1));
+  return results;
+}
+
+function collectIndependentSets(n, k, edges, limit) {
+  if (k === 0) return [[]];
+  if (k > n) return [];
+  const adjacency = buildAdjacencyMatrix(n, edges);
+  const results = [];
+
+  function search(chosen, start) {
+    if (results.length >= limit) return;
+    if (chosen.length === k) {
+      results.push(chosen.slice());
+      return;
+    }
+    for (let vertex = start; vertex <= n && results.length < limit; vertex++) {
+      if (chosen.length + (n - vertex + 1) < k) return;
+      let canUse = true;
+      for (const other of chosen) {
+        if (adjacency[vertex][other]) {
+          canUse = false;
+          break;
+        }
+      }
+      if (!canUse) continue;
+      chosen.push(vertex);
+      search(chosen, vertex + 1);
+      chosen.pop();
+    }
+  }
+
+  search([], 1);
+  return results;
+}
+
+function collectSetCovers(universeSize, k, sets, limit) {
+  const covered = Array(universeSize + 1).fill(false);
+  const chosen = [];
+  const results = [];
+  const seen = new Set();
+
+  function firstUncoveredElement() {
+    for (let element = 1; element <= universeSize; element++) {
+      if (!covered[element]) return element;
+    }
+    return 0;
+  }
+
+  function collect() {
+    const cover = chosen.slice().sort((a, b) => a - b);
+    const key = cover.join(":");
+    if (seen.has(key)) return;
+    seen.add(key);
+    results.push(cover);
+  }
+
+  function search() {
+    if (results.length >= limit) return;
+    const element = firstUncoveredElement();
+    if (element === 0) {
+      collect();
+      return;
+    }
+    if (chosen.length >= k) return;
+
+    for (let setIndex = 0; setIndex < sets.length && results.length < limit; setIndex++) {
+      if (!sets[setIndex].includes(element) || chosen.includes(setIndex + 1)) continue;
+      const newlyCovered = [];
+      for (const value of sets[setIndex]) {
+        if (!covered[value]) {
+          covered[value] = true;
+          newlyCovered.push(value);
+        }
+      }
+      chosen.push(setIndex + 1);
+      search();
+      chosen.pop();
+      for (const value of newlyCovered) covered[value] = false;
+    }
+  }
+
+  search();
+  return results;
+}
+
+function collectX3cCovers(universeSize, sets, limit) {
+  if (universeSize % 3 !== 0) return [];
+  const targetSetCount = universeSize / 3;
+  const covered = Array(universeSize + 1).fill(false);
+  const chosen = [];
+  const results = [];
+
+  function firstUncoveredElement() {
+    for (let element = 1; element <= universeSize; element++) {
+      if (!covered[element]) return element;
+    }
+    return 0;
+  }
+
+  function search() {
+    if (results.length >= limit) return;
+    const element = firstUncoveredElement();
+    if (element === 0) {
+      if (chosen.length === targetSetCount) results.push(chosen.slice());
+      return;
+    }
+    if (chosen.length >= targetSetCount) return;
+
+    for (let setIndex = 0; setIndex < sets.length && results.length < limit; setIndex++) {
+      if (!sets[setIndex].includes(element) || chosen.includes(setIndex + 1)) continue;
+      let canUse = true;
+      for (const value of sets[setIndex]) {
+        if (covered[value]) {
+          canUse = false;
+          break;
+        }
+      }
+      if (!canUse) continue;
+
+      for (const value of sets[setIndex]) covered[value] = true;
+      chosen.push(setIndex + 1);
+      search();
+      chosen.pop();
+      for (const value of sets[setIndex]) covered[value] = false;
+    }
+  }
+
+  search();
+  return results;
+}
+
+function collectGraphColorings(n, colorCount, edges, limit) {
+  const adjacency = Array.from({ length: n + 1 }, () => []);
+  for (const [u, v] of edges) {
+    adjacency[u].push(v);
+    adjacency[v].push(u);
+  }
+  const order = Array.from({ length: n }, (_, index) => index + 1)
+    .sort((a, b) => adjacency[b].length - adjacency[a].length);
+  const color = Array(n + 1).fill(0);
+  const results = [];
+
+  function canUse(vertex, candidateColor) {
+    for (const neighbor of adjacency[vertex]) {
+      if (color[neighbor] === candidateColor) return false;
+    }
+    return true;
+  }
+
+  function search(position) {
+    if (results.length >= limit) return;
+    if (position === order.length) {
+      results.push(color.slice());
+      return;
+    }
+    const vertex = order[position];
+    for (let candidateColor = 1; candidateColor <= colorCount && results.length < limit; candidateColor++) {
+      if (!canUse(vertex, candidateColor)) continue;
+      color[vertex] = candidateColor;
+      search(position + 1);
+      color[vertex] = 0;
+    }
+  }
+
+  search(0);
+  return results;
+}
+
+function formatSet(values) {
+  if (!values || values.length === 0) return "{}";
+  return `{${values.join(",")}}`;
+}
+
+function formatSatAssignmentWitness(assignment, variableCount) {
+  const values = [];
+  for (let variable = 1; variable <= variableCount; variable++) {
+    values.push(`x${variable}=${assignment[variable] === 1 ? "true" : "false"}`);
+  }
+  return values.join(", ");
+}
+
+function formatSetCoverWitness(chosenSets, sets) {
+  if (!chosenSets || chosenSets.length === 0) return "selected sets = {}";
+  return chosenSets
+    .map(index => `S${index}={${sets[index - 1].join(",")}}`)
+    .join("; ");
+}
+
+function formatGraphColoringWitness(color, n) {
+  const values = [];
+  for (let vertex = 1; vertex <= n; vertex++) {
+    values.push(`${vertex}:${graphColorName(color[vertex])}`);
+  }
+  return values.join(", ");
+}
+
+function appendWitnessFromHc(lines, hc, witnessBuilder) {
+  if (!witnessBuilder || !hc || !hc.hamiltonianFound) return;
+  const witnessLines = witnessBuilder(hc) || [];
+  if (witnessLines.length === 0) return;
+  append(lines);
+  append(lines, "Witnesses inferred from HC:");
+  witnessLines.forEach(line => append(lines, line));
 }
 
 function vertexCoverTo3Sat(n, k, edges) {
@@ -2297,40 +3513,188 @@ function summarizeLargeSudokuReduction(puzzle) {
   };
 }
 
+function appendDirectVertexCoverHcReduction(lines, graph, sourceLabel, answerLabel, yesText = "YES", noText = "NO", witnessBuilder = null) {
+  append(lines);
+  append(lines, "Direct Vertex Cover -> Hamiltonian Cycle reduction size:");
+  append(lines, `edge gadgets = ${graph.gadgetCount}`);
+  append(lines, `12-node gadget vertices = ${12 * graph.gadgetCount}`);
+  append(lines, `selector slots = ${graph.selectorSlots}`);
+  append(lines, `padding nodes = ${graph.paddingNodes || 0}`);
+  append(lines, `undirected HC nodes = ${graph.n}`);
+  append(lines, `allowed HC edges = ${graph.allowedEdgeKeys ? graph.allowedEdgeKeys.size : 0}`);
+  if (graph.decisionEdgeKeys) append(lines, `decision-style edges = ${graph.decisionEdgeKeys.size}`);
+  if (graph.vertexCoverPropagation) {
+    append(lines, "VC consequence rules = on");
+    const connectorCount = graph.vertexCoverPropagation.connectorEdgesByVertex
+      .reduce((sum, connectors) => sum + connectors.length, 0);
+    append(lines, `VC selected-vertex connector edges = ${connectorCount}`);
+    append(lines, `VC rejection patterns = ${graph.vertexCoverPropagation.rejectionPatterns.length}`);
+  }
+
+  const forced = findDegreeTwoForcedEdges(graph.edge, graph.n);
+  append(lines);
+  append(lines, "Degree-2 forced-edge precheck:");
+  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
+  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
+  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
+
+  const hc = runCompressedHcDecision(graph, sourceLabel);
+  const answerLine = inferredAnswerLine(hc, answerLabel, yesText, noText);
+  append(lines);
+  append(lines, "Final answer:");
+  append(lines, answerLine);
+  appendWitnessFromHc(lines, hc, witnessBuilder);
+  append(lines);
+  append(lines, hc.summary);
+  return hc;
+}
+
+function clauseLiteralsForVertexCoverTriangle(clause) {
+  if (clause.length === 1) return [clause[0], clause[0], clause[0]];
+  if (clause.length === 2) return [clause[0], clause[1], clause[1]];
+  if (clause.length === 3) return clause.slice();
+  throw new Error("3-SAT to Vertex Cover expects clauses with one, two, or three literals after normalization.");
+}
+
+function estimateSatToVertexCoverReduction(variableCount, clauseCount, padding = 0) {
+  const vertexCoverVertices = (2 * variableCount) + (3 * clauseCount);
+  const vertexCoverEdges = variableCount + (6 * clauseCount);
+  const vertexCoverTarget = variableCount + (2 * clauseCount);
+  const selectorSlots = Math.min(vertexCoverTarget, vertexCoverVertices);
+  const hcNodes = (12 * vertexCoverEdges) + (2 * selectorSlots) + padding;
+  return {
+    variableCount,
+    clauseCount,
+    vertexCoverVertices,
+    vertexCoverEdges,
+    vertexCoverTarget,
+    selectorSlots,
+    hcNodes,
+    padding
+  };
+}
+
+function buildSatToVertexCoverInstance(variableCount, clauses, padding = 0) {
+  const edges = [];
+  const add = (u, v) => {
+    if (u === v) return;
+    edges.push([u, v]);
+  };
+  const positiveVertex = variable => (2 * variable) - 1;
+  const negativeVertex = variable => 2 * variable;
+  const literalVertex = literal => literal > 0 ? positiveVertex(literal) : negativeVertex(-literal);
+
+  for (let variable = 1; variable <= variableCount; variable++) {
+    add(positiveVertex(variable), negativeVertex(variable));
+  }
+
+  for (let clauseIndex = 0; clauseIndex < clauses.length; clauseIndex++) {
+    const literals = clauseLiteralsForVertexCoverTriangle(clauses[clauseIndex]);
+    const base = (2 * variableCount) + (3 * clauseIndex) + 1;
+    const a = base;
+    const b = base + 1;
+    const c = base + 2;
+    add(a, b);
+    add(b, c);
+    add(a, c);
+    add(a, literalVertex(literals[0]));
+    add(b, literalVertex(literals[1]));
+    add(c, literalVertex(literals[2]));
+  }
+
+  return {
+    n: (2 * variableCount) + (3 * clauses.length),
+    k: variableCount + (2 * clauses.length),
+    padding,
+    edges,
+    variableCount,
+    clauseCount: clauses.length
+  };
+}
+
+function prepareSatViaVertexCoverForHc(sat, padding, materializeLimit = getHcSolveNodeLimit()) {
+  const simplified = simplify3SatForHc(sat.variableCount, sat.clauses);
+  if (simplified.contradiction) {
+    return { simplified, vertexCover: null, graph: null, stats: null, skipped: false };
+  }
+
+  const stats = estimateSatToVertexCoverReduction(simplified.variableCount, simplified.clauses.length, padding);
+  if (stats.hcNodes > materializeLimit) {
+    return {
+      simplified,
+      vertexCover: null,
+      graph: null,
+      stats,
+      skipped: true,
+      skipReason: `${stats.hcNodes} HC nodes is above the HC solve node limit ${materializeLimit}`
+    };
+  }
+
+  const vertexCover = buildSatToVertexCoverInstance(simplified.variableCount, simplified.clauses, padding);
+  const graph = buildDirectVertexCoverHcGraph(vertexCover.n, vertexCover.k, vertexCover.edges, padding);
+  return { simplified, vertexCover, graph, stats, skipped: false };
+}
+
+function appendSatViaVertexCoverHcReduction(lines, prepared, sourceLabel, answerLabel, yesText = "YES", noText = "NO", witnessBuilder = null) {
+  append(lines);
+  appendSatSimplificationSummary(lines, prepared.simplified);
+  if (prepared.simplified.contradiction) {
+    append(lines);
+    append(lines, "NP-douce HC solver result:");
+    append(lines, "HC solver skipped because exact unit propagation already proved the reduced SAT formula impossible.");
+    append(lines);
+    append(lines, "Final answer:");
+    append(lines, `${answerLabel} answer after exact unit simplification: ${noText}`);
+    return { text: "", summary: "", totalTourCost: NaN, hamiltonianFound: false, notComputed: true };
+  }
+
+  append(lines);
+  append(lines, "Classic 3-SAT -> Vertex Cover size:");
+  append(lines, `SAT variables sent to Vertex Cover = ${prepared.stats.variableCount}`);
+  append(lines, `SAT clauses sent to Vertex Cover = ${prepared.stats.clauseCount}`);
+  append(lines, `Vertex Cover vertices = ${prepared.stats.vertexCoverVertices}`);
+  append(lines, `Vertex Cover edges = ${prepared.stats.vertexCoverEdges}`);
+  append(lines, `Vertex Cover target k = ${prepared.stats.vertexCoverTarget}`);
+  append(lines, `estimated HC nodes after Vertex Cover gadget = ${prepared.stats.hcNodes}`);
+
+  if (prepared.skipped) {
+    append(lines);
+    append(lines, "NP-douce HC solver result:");
+    append(lines, `HC solver not run because ${prepared.skipReason}.`);
+    append(lines, "Raise the HC solve node limit if you want to force this reduced HC instance through the solver.");
+    append(lines);
+    append(lines, "Final answer:");
+    append(lines, `${answerLabel} answer inferred from HC: NOT COMPUTED`);
+    return { text: "", summary: "", totalTourCost: NaN, hamiltonianFound: false, notComputed: true };
+  }
+
+  return appendDirectVertexCoverHcReduction(lines, prepared.graph, sourceLabel, answerLabel, yesText, noText, witnessBuilder);
+}
+
 function runVertexCover(text) {
   const { n, k, padding, edges } = parseVertexCover(text);
-  const sat = vertexCoverTo3Sat(n, k, edges);
-  const graph = buildCompressedReductionGraph(sat.variableCount, sat.clauses, padding);
-  const forced = findDegreeTwoForcedEdges(graph.edge, graph.n);
+  const graph = buildDirectVertexCoverHcGraph(n, k, edges, padding);
 
   const lines = [];
   append(lines, "Vertex Cover instance:");
   append(lines, `vertices = ${n}`);
   append(lines, `edges = ${edges.length}`);
   append(lines, `k = ${k}`);
-  append(lines, `optional padding directed nodes = ${padding}`);
+  append(lines, `optional padding nodes = ${padding}`);
   append(lines, `edge list = ${edges.map(([u, v]) => `(${u},${v})`).join(" ")}`);
   append(lines);
-  append(lines, "3-SAT encoding:");
-  append(lines, `cardinality encoding = ${sat.encoding}`);
-  append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `variables including auxiliary = ${sat.variableCount}`);
-  append(lines, `3-SAT clauses = ${sat.clauses.length}`);
-  append(lines);
-  append(lines, "Compressed HC reduction size:");
-  append(lines, `base directed nodes = ${graph.baseDirected}`);
-  append(lines, `total directed nodes = ${graph.directedCount}`);
-  append(lines, `undirected HC nodes = ${graph.n}`);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
-  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
-  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
-  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
-  append(lines);
-  const hc = runCompressedHcDecision(graph, "Vertex Cover compressed HC reduction");
-  append(lines, hc.summary);
-  append(lines);
-  append(lines, inferredAnswerLine(hc, "Vertex Cover"));
+  append(lines, "Reduction used:");
+  append(lines, "Vertex Cover(G, k) -> direct 12-node edge gadgets -> Hamiltonian Cycle");
+  append(lines, "Gadget crosses: u1-v3, v1-u3, u6-v4, u4-v6.");
+  appendDirectVertexCoverHcReduction(lines, graph, "Vertex Cover direct HC reduction", "Vertex Cover", "YES", "NO", () => {
+    const limit = witnessDisplayLimit();
+    const covers = collectVertexCovers(n, k, edges, limit);
+    if (covers.length === 0) return ["vertex cover witness unavailable even though HC returned YES"];
+    return [
+      `vertex covers shown = ${covers.length} / limit ${limit}`,
+      ...covers.map((cover, index) => `${index + 1}. vertex cover = ${formatSet(cover)}; cover size = ${cover.length} / k=${k}`)
+    ];
+  });
   return lines.join("\n");
 }
 
@@ -2338,151 +3702,127 @@ function runClique(text) {
   const { n, k, padding, edges } = parseClique(text);
   const complementEdges = buildComplementEdges(n, edges);
   const vertexCoverK = n - k;
-  const sat = vertexCoverK >= 0 ? vertexCoverTo3Sat(n, vertexCoverK, complementEdges) : null;
-  const graph = sat ? buildCompressedReductionGraph(sat.variableCount, sat.clauses, padding) : null;
-  const forced = graph ? findDegreeTwoForcedEdges(graph.edge, graph.n) : null;
+  const graph = vertexCoverK >= 0 ? buildDirectVertexCoverHcGraph(n, vertexCoverK, complementEdges, padding) : null;
 
   const lines = [];
   append(lines, "Clique instance:");
   append(lines, `vertices = ${n}`);
   append(lines, `edges = ${edges.length}`);
   append(lines, `k = ${k}`);
-  append(lines, `optional padding directed nodes = ${padding}`);
+  append(lines, `optional padding nodes = ${padding}`);
   append(lines, `edge list = ${edges.map(([u, v]) => `(${u},${v})`).join(" ") || "(none)"}`);
   append(lines);
   append(lines, "Reduction used:");
-  append(lines, "Clique(G, k) -> Vertex Cover(complement(G), vertices - k) -> 3-SAT -> compressed Hamiltonian Cycle");
+  append(lines, "Clique(G, k) -> Vertex Cover(complement(G), vertices - k) -> direct 12-node edge gadgets -> Hamiltonian Cycle");
   append(lines, `complement graph edges = ${complementEdges.length}`);
   append(lines, `vertex cover target on complement = ${vertexCoverK}`);
 
-  if (!sat || !graph || !forced) {
+  if (!graph) {
     append(lines);
+    append(lines, "Final answer:");
     append(lines, "Clique answer: NO");
     append(lines, `k = ${k} is larger than the vertex count ${n}`);
     return lines.join("\n");
   }
 
-  append(lines);
-  append(lines, "3-SAT encoding:");
-  append(lines, `cardinality encoding = ${sat.encoding}`);
-  append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `variables including auxiliary = ${sat.variableCount}`);
-  append(lines, `3-SAT clauses = ${sat.clauses.length}`);
-  append(lines);
-  append(lines, "Compressed HC reduction size:");
-  append(lines, `base directed nodes = ${graph.baseDirected}`);
-  append(lines, `total directed nodes = ${graph.directedCount}`);
-  append(lines, `undirected HC nodes = ${graph.n}`);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
-  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
-  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
-  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
-  append(lines);
-  const hc = runCompressedHcDecision(graph, "Clique compressed HC reduction");
-  append(lines, hc.summary);
-  append(lines);
-  append(lines, inferredAnswerLine(hc, "Clique"));
+  appendDirectVertexCoverHcReduction(lines, graph, "Clique via direct Vertex Cover HC reduction", "Clique", "YES", "NO", () => {
+    const limit = witnessDisplayLimit();
+    const cliques = collectCliques(n, k, edges, limit);
+    if (cliques.length === 0) return ["clique witness unavailable even though HC returned YES"];
+    return [
+      `cliques shown = ${cliques.length} / limit ${limit}`,
+      ...cliques.map((clique, index) => {
+        const cliqueSet = new Set(clique);
+        const complementCover = [];
+        for (let vertex = 1; vertex <= n; vertex++) if (!cliqueSet.has(vertex)) complementCover.push(vertex);
+        return `${index + 1}. clique = ${formatSet(clique)}; complement vertex cover = ${formatSet(complementCover)}; clique size = ${clique.length} / requested k=${k}`;
+      })
+    ];
+  });
   return lines.join("\n");
 }
 
 function runIndependentSet(text) {
   const { n, k, padding, edges } = parseIndependentSet(text);
   const vertexCoverK = n - k;
-  const sat = vertexCoverK >= 0 ? vertexCoverTo3Sat(n, vertexCoverK, edges) : null;
-  const graph = sat ? buildCompressedReductionGraph(sat.variableCount, sat.clauses, padding) : null;
-  const forced = graph ? findDegreeTwoForcedEdges(graph.edge, graph.n) : null;
+  const graph = vertexCoverK >= 0 ? buildDirectVertexCoverHcGraph(n, vertexCoverK, edges, padding) : null;
 
   const lines = [];
   append(lines, "Independent Set instance:");
   append(lines, `vertices = ${n}`);
   append(lines, `edges = ${edges.length}`);
   append(lines, `k = ${k}`);
-  append(lines, `optional padding directed nodes = ${padding}`);
+  append(lines, `optional padding nodes = ${padding}`);
   append(lines, `edge list = ${edges.map(([u, v]) => `(${u},${v})`).join(" ") || "(none)"}`);
   append(lines);
   append(lines, "Reduction used:");
-  append(lines, "Independent Set(G, k) -> Vertex Cover(G, vertices - k) -> 3-SAT -> compressed Hamiltonian Cycle");
+  append(lines, "Independent Set(G, k) -> Vertex Cover(G, vertices - k) -> direct 12-node edge gadgets -> Hamiltonian Cycle");
   append(lines, `vertex cover target = ${vertexCoverK}`);
 
-  if (!sat || !graph || !forced) {
+  if (!graph) {
     append(lines);
+    append(lines, "Final answer:");
     append(lines, "Independent Set answer: NO");
     append(lines, `k = ${k} is larger than the vertex count ${n}`);
     return lines.join("\n");
   }
 
-  append(lines);
-  append(lines, "3-SAT encoding:");
-  append(lines, `cardinality encoding = ${sat.encoding}`);
-  append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `variables including auxiliary = ${sat.variableCount}`);
-  append(lines, `3-SAT clauses = ${sat.clauses.length}`);
-  append(lines);
-  append(lines, "Compressed HC reduction size:");
-  append(lines, `base directed nodes = ${graph.baseDirected}`);
-  append(lines, `total directed nodes = ${graph.directedCount}`);
-  append(lines, `undirected HC nodes = ${graph.n}`);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
-  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
-  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
-  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
-  append(lines);
-  const hc = runCompressedHcDecision(graph, "Independent Set compressed HC reduction");
-  append(lines, hc.summary);
-  append(lines);
-  append(lines, inferredAnswerLine(hc, "Independent Set"));
+  appendDirectVertexCoverHcReduction(lines, graph, "Independent Set via direct Vertex Cover HC reduction", "Independent Set", "YES", "NO", () => {
+    const limit = witnessDisplayLimit();
+    const independentSets = collectIndependentSets(n, k, edges, limit);
+    if (independentSets.length === 0) return ["independent set witness unavailable even though HC returned YES"];
+    return [
+      `independent sets shown = ${independentSets.length} / limit ${limit}`,
+      ...independentSets.map((independent, index) => {
+        const independentSet = new Set(independent);
+        const cover = [];
+        for (let vertex = 1; vertex <= n; vertex++) if (!independentSet.has(vertex)) cover.push(vertex);
+        return `${index + 1}. independent set = ${formatSet(independent)}; vertex cover = ${formatSet(cover)}; independent set size = ${independent.length} / requested k=${k}`;
+      })
+    ];
+  });
   return lines.join("\n");
 }
 
 function runSetCover(text) {
   const { universeSize, setCount, k, padding, sets } = parseSetCover(text);
   const sat = setCoverTo3Sat(universeSize, setCount, k, sets);
-  const graph = buildCompressedReductionGraph(sat.variableCount, sat.clauses, padding);
-  const forced = findDegreeTwoForcedEdges(graph.edge, graph.n);
+  const prepared = prepareSatViaVertexCoverForHc(sat, padding);
 
   const lines = [];
   append(lines, "Set Cover instance:");
   append(lines, `universe elements = ${universeSize}`);
   append(lines, `sets = ${setCount}`);
   append(lines, `k = ${k}`);
-  append(lines, `optional padding directed nodes = ${padding}`);
+  append(lines, `optional padding nodes = ${padding}`);
   append(lines, "sets:");
   sets.forEach((set, index) => append(lines, `S${index + 1} = { ${set.join(", ")} }`));
   append(lines);
   append(lines, "Reduction used:");
-  append(lines, "Set Cover -> 3-SAT coverage clauses plus at-most-k -> compressed Hamiltonian Cycle");
+  append(lines, "Set Cover -> 3-SAT coverage clauses plus at-most-k -> classic Vertex Cover -> direct Hamiltonian Cycle");
   append(lines, `one Boolean variable per set before auxiliary variables = ${setCount}`);
   append(lines);
   append(lines, "3-SAT encoding:");
   append(lines, `cardinality encoding = ${sat.encoding}`);
   append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `variables including auxiliary = ${sat.variableCount}`);
-  append(lines, `3-SAT clauses = ${sat.clauses.length}`);
-  append(lines);
-  append(lines, "Compressed HC reduction size:");
-  append(lines, `base directed nodes = ${graph.baseDirected}`);
-  append(lines, `total directed nodes = ${graph.directedCount}`);
-  append(lines, `undirected HC nodes = ${graph.n}`);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
-  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
-  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
-  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
-  append(lines);
-  const hc = runCompressedHcDecision(graph, "Set Cover compressed HC reduction");
-  append(lines, hc.summary);
-  append(lines);
-  append(lines, inferredAnswerLine(hc, "Set Cover"));
+  append(lines, `variables before simplification = ${sat.variableCount}`);
+  append(lines, `3-SAT clauses before simplification = ${sat.clauses.length}`);
+  appendSatViaVertexCoverHcReduction(lines, prepared, "Set Cover via 3-SAT -> Vertex Cover -> direct HC", "Set Cover", "YES", "NO", () => {
+    const limit = witnessDisplayLimit();
+    const covers = collectSetCovers(universeSize, k, sets, limit);
+    if (covers.length === 0) return ["set cover witness unavailable even though HC returned YES"];
+    return [
+      `set covers shown = ${covers.length} / limit ${limit}`,
+      ...covers.map((cover, index) => `${index + 1}. selected set indices = ${formatSet(cover)}; ${formatSetCoverWitness(cover, sets)}; sets selected = ${cover.length} / k=${k}`)
+    ];
+  });
   return lines.join("\n");
 }
 
 function runX3c(text) {
   const { universeSize, setCount, padding, sets } = parseX3c(text);
   const sat = x3cTo3Sat(universeSize, setCount, sets);
-  const graph = buildCompressedReductionGraph(sat.variableCount, sat.clauses, padding);
-  const forced = findDegreeTwoForcedEdges(graph.edge, graph.n);
+  const prepared = prepareSatViaVertexCoverForHc(sat, padding);
   const targetSetCount = universeSize % 3 === 0 ? universeSize / 3 : "not integral";
 
   const lines = [];
@@ -2490,34 +3830,28 @@ function runX3c(text) {
   append(lines, `universe elements = ${universeSize}`);
   append(lines, `3-sets = ${setCount}`);
   append(lines, `target selected sets = ${targetSetCount}`);
-  append(lines, `optional padding directed nodes = ${padding}`);
+  append(lines, `optional padding nodes = ${padding}`);
   append(lines, "sets:");
   sets.forEach((set, index) => append(lines, `S${index + 1} = { ${set.join(", ")} }`));
   append(lines);
   append(lines, "Reduction used:");
-  append(lines, "X3C -> 3-SAT exactly-once coverage clauses -> compressed Hamiltonian Cycle");
+  append(lines, "X3C -> 3-SAT exactly-once coverage clauses -> classic Vertex Cover -> direct Hamiltonian Cycle");
   append(lines, `one Boolean variable per 3-set before auxiliary variables = ${setCount}`);
   append(lines);
   append(lines, "3-SAT encoding:");
   append(lines, `encoding = ${sat.encoding}`);
   append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `variables including auxiliary = ${sat.variableCount}`);
-  append(lines, `3-SAT clauses = ${sat.clauses.length}`);
-  append(lines);
-  append(lines, "Compressed HC reduction size:");
-  append(lines, `base directed nodes = ${graph.baseDirected}`);
-  append(lines, `total directed nodes = ${graph.directedCount}`);
-  append(lines, `undirected HC nodes = ${graph.n}`);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
-  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
-  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
-  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
-  append(lines);
-  const hc = runCompressedHcDecision(graph, "X3C compressed HC reduction");
-  append(lines, hc.summary);
-  append(lines);
-  append(lines, inferredAnswerLine(hc, "X3C"));
+  append(lines, `variables before simplification = ${sat.variableCount}`);
+  append(lines, `3-SAT clauses before simplification = ${sat.clauses.length}`);
+  appendSatViaVertexCoverHcReduction(lines, prepared, "X3C via 3-SAT -> Vertex Cover -> direct HC", "X3C", "YES", "NO", () => {
+    const limit = witnessDisplayLimit();
+    const exactCovers = collectX3cCovers(universeSize, sets, limit);
+    if (exactCovers.length === 0) return ["exact cover witness unavailable even though HC returned YES"];
+    return [
+      `exact covers shown = ${exactCovers.length} / limit ${limit}`,
+      ...exactCovers.map((exactCover, index) => `${index + 1}. selected 3-set indices = ${formatSet(exactCover)}; ${formatSetCoverWitness(exactCover, sets)}; sets selected = ${exactCover.length} / target=${targetSetCount}`)
+    ];
+  });
   return lines.join("\n");
 }
 
@@ -2529,8 +3863,7 @@ function graphColorName(index) {
 function runGraphColoring(text) {
   const { n, declaredEdgeCount, colorCount, padding, edges } = parseGraphColoring(text);
   const sat = graphColoringTo3Sat(n, colorCount, edges);
-  const graph = buildCompressedReductionGraph(sat.variableCount, sat.clauses, padding);
-  const forced = findDegreeTwoForcedEdges(graph.edge, graph.n);
+  const prepared = prepareSatViaVertexCoverForHc(sat, padding);
 
   const lines = [];
   append(lines, "Graph Coloring instance:");
@@ -2538,33 +3871,27 @@ function runGraphColoring(text) {
   append(lines, `declared edges = ${declaredEdgeCount}`);
   append(lines, `unique edges used = ${edges.length}`);
   append(lines, `colors requested = ${colorCount}`);
-  append(lines, `optional padding directed nodes = ${padding}`);
+  append(lines, `optional padding nodes = ${padding}`);
   append(lines, `edge list = ${edges.map(([u, v]) => `(${u},${v})`).join(" ") || "(none)"}`);
   append(lines);
   append(lines, "Reduction used:");
-  append(lines, "Graph Coloring -> 3-SAT color clauses -> compressed Hamiltonian Cycle");
+  append(lines, "Graph Coloring -> 3-SAT color clauses -> classic Vertex Cover -> direct Hamiltonian Cycle");
   append(lines, `${colorCount} Boolean color variables per vertex`);
   append(lines);
   append(lines, "3-SAT encoding:");
   append(lines, `encoding = ${sat.encoding}`);
   append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `variables = ${sat.variableCount}`);
-  append(lines, `3-SAT clauses = ${sat.clauses.length}`);
-  append(lines);
-  append(lines, "Compressed HC reduction size:");
-  append(lines, `base directed nodes = ${graph.baseDirected}`);
-  append(lines, `total directed nodes = ${graph.directedCount}`);
-  append(lines, `undirected HC nodes = ${graph.n}`);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
-  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
-  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
-  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
-  append(lines);
-  const hc = runCompressedHcDecision(graph, "Graph Coloring compressed HC reduction");
-  append(lines, hc.summary);
-  append(lines);
-  append(lines, inferredAnswerLine(hc, "Graph Coloring"));
+  append(lines, `variables before simplification = ${sat.variableCount}`);
+  append(lines, `3-SAT clauses before simplification = ${sat.clauses.length}`);
+  appendSatViaVertexCoverHcReduction(lines, prepared, "Graph Coloring via 3-SAT -> Vertex Cover -> direct HC", "Graph Coloring", "YES", "NO", () => {
+    const limit = witnessDisplayLimit();
+    const colorings = collectGraphColorings(n, colorCount, edges, limit);
+    if (colorings.length === 0) return ["coloring witness unavailable even though HC returned YES"];
+    return [
+      `colorings shown = ${colorings.length} / limit ${limit}`,
+      ...colorings.map((color, index) => `${index + 1}. coloring = ${formatGraphColoringWitness(color, n)}; colors used = ${formatSet(Array.from(new Set(color.slice(1))).sort((a, b) => a - b).map(graphColorName))}`)
+    ];
+  });
   return lines.join("\n");
 }
 
@@ -2572,8 +3899,11 @@ function runSudoku() {
   const puzzle = readSudokuPuzzle();
   const compactMode = puzzle.n <= 16;
   const sat = compactMode ? sudokuTo3Sat(puzzle) : summarizeLargeSudokuReduction(puzzle);
-  const stats = compactMode ? estimateCompressedReductionGraph(sat.variableCount, sat.clauses, 0) : sat.stats;
   const denseLimit = Math.max(0, Math.floor(readNonnegativeNumber("sudokuHcLimit", "Dense HC calculation node limit")));
+  const prepared = compactMode ? prepareSatViaVertexCoverForHc(sat, 0, denseLimit) : null;
+  const stats = compactMode && !prepared.simplified.contradiction
+    ? prepared.stats
+    : estimateSatToVertexCoverReduction(sat.variableCount, sat.clauseCount || 0, 0);
   let hc = null;
   let solution = null;
   const lines = [];
@@ -2587,46 +3917,52 @@ function runSudoku() {
   append(lines, formatSudokuGrid(puzzle.grid, puzzle.symbols));
   append(lines);
   append(lines, "Exact Sudoku reduction:");
-  append(lines, "Sudoku -> exact cover style 3-SAT -> compressed Hamiltonian Cycle");
+  append(lines, "Sudoku -> exact cover style 3-SAT -> classic Vertex Cover -> direct Hamiltonian Cycle");
   append(lines, `base placement variables = ${sat.baseVariableCount}`);
-  append(lines, `SAT variables including auxiliary = ${sat.variableCount}`);
+  append(lines, `SAT variables before simplification = ${sat.variableCount}`);
   append(lines, `CNF clauses before 3-literal normalization = ${sat.rawClauseCount}`);
-  append(lines, `3-SAT clauses = ${compactMode ? sat.clauses.length : sat.clauseCount}`);
+  append(lines, `3-SAT clauses before simplification = ${compactMode ? sat.clauses.length : sat.clauseCount}`);
   if (!compactMode) append(lines, "Large Sudoku mode: clauses are counted exactly without materializing the full clause list in memory.");
   append(lines);
-  append(lines, "Compressed HC reduction size:");
-  append(lines, `base directed nodes = ${stats.baseDirected}`);
-  append(lines, `total directed nodes = ${stats.directedCount}`);
-  append(lines, `undirected HC nodes = ${stats.n}`);
-  append(lines, `directed arcs = ${stats.arcCount}`);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
   if (compactMode) {
-    append(lines, `vertices with exactly two HC edges = ${stats.forcedVertexCount}`);
-    append(lines, `forced HC edges = ${stats.forcedEdgeCount}`);
-    append(lines, `forced edge total = ${formatNumber(stats.forcedEdgeTotal)}`);
+    appendSatSimplificationSummary(lines, prepared.simplified);
   } else {
-    append(lines, "not materialized for 25x25 mode, because building every HC edge would be too much memory for a browser or phone");
+    append(lines, "Exact unit-clause simplification before HC:");
+    append(lines, "not materialized for 25x25 mode, because building the full clause list would be too much memory for a browser or phone");
   }
   append(lines);
-  if (compactMode && stats.n <= denseLimit) {
-    const graph = buildCompressedReductionGraph(sat.variableCount, sat.clauses, 0);
-    hc = runCompressedHcDecision(graph, "Sudoku compressed HC reduction");
-    append(lines, hc.summary);
+  if (compactMode && prepared.simplified.contradiction) {
+    append(lines, "NP-douce HC solver result:");
+    append(lines, "HC solver skipped because exact unit propagation already proved the Sudoku constraints impossible.");
     append(lines);
-    append(lines, inferredAnswerLine(hc, "Sudoku", "SOLUTION EXISTS", "NO SOLUTION"));
+    append(lines, "Final answer:");
+    append(lines, "Sudoku answer inferred from HC: NO SOLUTION");
+  } else {
+    append(lines, "Classic 3-SAT -> Vertex Cover size:");
+    append(lines, `SAT variables sent to Vertex Cover = ${stats.variableCount}`);
+    append(lines, `SAT clauses sent to Vertex Cover = ${stats.clauseCount}`);
+    append(lines, `Vertex Cover vertices = ${stats.vertexCoverVertices}`);
+    append(lines, `Vertex Cover edges = ${stats.vertexCoverEdges}`);
+    append(lines, `Vertex Cover target k = ${stats.vertexCoverTarget}`);
+    append(lines, `estimated HC nodes after Vertex Cover gadget = ${stats.hcNodes}`);
+  }
+  append(lines);
+  if (compactMode && !prepared.simplified.contradiction && !prepared.skipped) {
+    hc = appendDirectVertexCoverHcReduction(lines, prepared.graph, "Sudoku via 3-SAT -> Vertex Cover -> direct HC", "Sudoku", "SOLUTION EXISTS", "NO SOLUTION");
     if (hc.hamiltonianFound) {
       solution = solveSudokuPuzzle(puzzle);
       if (solution) {
         applySudokuSolution(puzzle, solution);
         append(lines);
-        append(lines, "Visual witness filled after HC returned YES:");
+        append(lines, "Sudoku witness inferred from HC:");
         append(lines, formatSudokuGrid(solution, puzzle.symbols));
       }
     }
-  } else {
+  } else if (!compactMode || !prepared.simplified.contradiction) {
     append(lines, "NP-douce HC solver result:");
-    append(lines, `HC solver not run because ${stats.n} nodes is above the safety limit ${denseLimit}${compactMode ? "" : " or the Sudoku is in 25x25 large mode"}.`);
+    append(lines, `HC solver not run because ${stats.hcNodes} nodes is above the safety limit ${denseLimit}${compactMode ? "" : " or the Sudoku is in 25x25 large mode"}.`);
+    append(lines);
+    append(lines, "Final answer:");
     append(lines, "Sudoku answer inferred from HC: NOT COMPUTED");
   }
   return lines.join("\n");
@@ -3043,8 +4379,7 @@ function runPacking3d() {
   const packed = packBoxesExtremePoint(input);
   drawPackingScene(input.truck, packed.placed);
   const reduction = buildPackingCandidateReduction(input, packed);
-  const graph = buildCompressedReductionGraph(reduction.variableCount, reduction.clauses, 0);
-  const forced = findDegreeTwoForcedEdges(graph.edge, graph.n);
+  const prepared = prepareSatViaVertexCoverForHc(reduction, 0);
   const truckVolume = input.truck.l * input.truck.w * input.truck.h;
   const totalBoxVolume = packed.items.reduce((sum, item) => sum + item.volume, 0);
   const totalBoxWeight = packed.items.reduce((sum, item) => sum + item.weight, 0);
@@ -3081,27 +4416,21 @@ function runPacking3d() {
   append(lines);
   append(lines, "Candidate-placement reduction:");
   append(lines, "Each candidate means one exact box orientation at one generated position. Clauses choose one placement per box and reject overlaps.");
+  append(lines, "Candidate 3-SAT -> classic Vertex Cover -> direct Hamiltonian Cycle.");
   append(lines, `max packing options sent to HC = ${input.candidateBudget}`);
   append(lines, `generated candidates = ${reduction.generatedCandidates}`);
   append(lines, `kept candidates = ${reduction.keptCandidates}${reduction.pruned ? " (pruned for low nodes)" : ""}`);
-  append(lines, `SAT variables including auxiliary = ${reduction.variableCount}`);
+  append(lines, `SAT variables before simplification = ${reduction.variableCount}`);
   append(lines, `CNF clauses before 3-literal normalization = ${reduction.rawClauseCount}`);
-  append(lines, `3-SAT clauses = ${reduction.clauses.length}`);
+  append(lines, `3-SAT clauses before simplification = ${reduction.clauses.length}`);
   if (reduction.impossibleReasons.length) append(lines, `necessary impossibility check = ${reduction.impossibleReasons.join("; ")}`);
-  append(lines);
-  append(lines, "Compressed HC reduction size:");
-  append(lines, `base directed nodes = ${graph.baseDirected}`);
-  append(lines, `undirected HC nodes = ${graph.n}`);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
-  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
-  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
-  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
-  append(lines);
-  const hc = runCompressedHcDecision(graph, "3D packing candidate-placement compressed HC reduction");
-  append(lines, hc.summary);
-  append(lines);
-  append(lines, inferredAnswerLine(hc, "Packing candidate model"));
+  appendSatViaVertexCoverHcReduction(lines, prepared, "3D packing via 3-SAT -> Vertex Cover -> direct HC", "Packing candidate model", "YES", "NO", () => {
+    if (packed.placed.length === 0) return ["no packed box placements in the current candidate manifest"];
+    return [
+      `packed boxes = ${formatSet(packed.placed.map(box => box.id))}`,
+      "placement coordinates are listed in the Box placement manifest above"
+    ];
+  });
   append(lines, "The manifest above is a visual/practical placement guide; the YES/NO line comes from the HC solver.");
   append(lines, "Higher max packing options send more possibilities into HC, creating more nodes and slower runs.");
   return lines.join("\n");
@@ -3115,244 +4444,200 @@ function formatFormula(clauses) {
   return clauses.map(clause => `(${clause.map(literalText).join(" OR ")})`).join(" AND ");
 }
 
+function normalizeClauseLiterals(literals) {
+  const seen = new Set();
+  const normalized = [];
+  for (const literal of literals) {
+    if (seen.has(-literal)) return { tautology: true, literals: [] };
+    if (seen.has(literal)) continue;
+    seen.add(literal);
+    normalized.push(literal);
+  }
+  return { tautology: false, literals: normalized };
+}
+
+function simplify3SatForHc(variableCount, clauses) {
+  let activeClauses = [];
+  let tautologyClauses = 0;
+  let satisfiedClauses = 0;
+  let forcedAssignments = 0;
+  const assignment = Array(variableCount + 1).fill(0);
+
+  for (const clause of clauses) {
+    const normalized = normalizeClauseLiterals(clause);
+    if (normalized.tautology) {
+      tautologyClauses += 1;
+    } else {
+      activeClauses.push(normalized.literals);
+    }
+  }
+
+  while (true) {
+    const nextClauses = [];
+    const units = [];
+
+    for (const clause of activeClauses) {
+      let satisfied = false;
+      const remaining = [];
+      for (const literal of clause) {
+        const variable = Math.abs(literal);
+        const value = assignment[variable] || 0;
+        if (value === 0) {
+          remaining.push(literal);
+        } else if ((literal > 0 && value === 1) || (literal < 0 && value === -1)) {
+          satisfied = true;
+          break;
+        }
+      }
+      if (satisfied) {
+        satisfiedClauses += 1;
+        continue;
+      }
+
+      const normalized = normalizeClauseLiterals(remaining);
+      if (normalized.tautology) {
+        tautologyClauses += 1;
+        continue;
+      }
+      if (normalized.literals.length === 0) {
+        return {
+          variableCount,
+          clauses: [],
+          assignment,
+          contradiction: true,
+          contradictionReason: "a clause became empty during unit propagation",
+          originalClauseCount: clauses.length,
+          simplifiedClauseCount: 0,
+          finalClauseCount: 0,
+          tautologyClauses,
+          satisfiedClauses,
+          forcedAssignments,
+          binaryExpandedClauses: 0,
+          auxiliaryVariablesAdded: 0
+        };
+      }
+      if (normalized.literals.length === 1) units.push(normalized.literals[0]);
+      nextClauses.push(normalized.literals);
+    }
+
+    let changed = false;
+    for (const literal of units) {
+      const variable = Math.abs(literal);
+      const desired = literal > 0 ? 1 : -1;
+      if (assignment[variable] !== 0 && assignment[variable] !== desired) {
+        return {
+          variableCount,
+          clauses: [],
+          assignment,
+          contradiction: true,
+          contradictionReason: `unit clauses force both x${variable} and ~x${variable}`,
+          originalClauseCount: clauses.length,
+          simplifiedClauseCount: 0,
+          finalClauseCount: 0,
+          tautologyClauses,
+          satisfiedClauses,
+          forcedAssignments,
+          binaryExpandedClauses: 0,
+          auxiliaryVariablesAdded: 0
+        };
+      }
+      if (assignment[variable] === 0) {
+        assignment[variable] = desired;
+        forcedAssignments += 1;
+        changed = true;
+      }
+    }
+
+    activeClauses = nextClauses;
+    if (!changed) break;
+  }
+
+  const simplifiedClauseCount = activeClauses.length;
+  const finalClauses = [];
+  let nextVariable = variableCount;
+  let binaryExpandedClauses = 0;
+
+  for (const clause of activeClauses) {
+    if (clause.length === 2) {
+      finalClauses.push(clause);
+      binaryExpandedClauses += 1;
+    } else if (clause.length === 3) {
+      finalClauses.push(clause);
+    } else if (clause.length > 3) {
+      let previousAux = ++nextVariable;
+      finalClauses.push([clause[0], clause[1], previousAux]);
+      for (let index = 2; index < clause.length - 2; index++) {
+        const nextAux = ++nextVariable;
+        finalClauses.push([-previousAux, clause[index], nextAux]);
+        previousAux = nextAux;
+      }
+      finalClauses.push([-previousAux, clause[clause.length - 2], clause[clause.length - 1]]);
+    }
+  }
+
+  return {
+    variableCount: nextVariable,
+    clauses: finalClauses,
+    assignment,
+    contradiction: false,
+    contradictionReason: "",
+    originalClauseCount: clauses.length,
+    simplifiedClauseCount,
+    finalClauseCount: finalClauses.length,
+    tautologyClauses,
+    satisfiedClauses,
+    forcedAssignments,
+    binaryExpandedClauses,
+    auxiliaryVariablesAdded: nextVariable - variableCount
+  };
+}
+
+function forcedAssignmentText(assignment) {
+  const values = [];
+  for (let variable = 1; variable < assignment.length; variable++) {
+    if (assignment[variable] === 1) values.push(`x${variable}=true`);
+    if (assignment[variable] === -1) values.push(`x${variable}=false`);
+  }
+  return values.join(", ") || "(none)";
+}
+
+function appendSatSimplificationSummary(lines, simplified) {
+  append(lines, "Exact unit-clause simplification before HC:");
+  append(lines, `unit-forced assignments = ${simplified.forcedAssignments}`);
+  append(lines, `forced values = ${forcedAssignmentText(simplified.assignment)}`);
+  append(lines, `clauses removed as satisfied = ${simplified.satisfiedClauses}`);
+  append(lines, `tautology clauses removed = ${simplified.tautologyClauses}`);
+  append(lines, `clauses left after unit propagation = ${simplified.simplifiedClauseCount}`);
+  append(lines, `binary clauses kept without duplicate gadget ports = ${simplified.binaryExpandedClauses}`);
+  append(lines, `auxiliary variables added by simplification = ${simplified.auxiliaryVariablesAdded}`);
+  append(lines, `3-SAT clauses sent to HC = ${simplified.finalClauseCount}`);
+  if (simplified.contradiction) append(lines, `contradiction = ${simplified.contradictionReason}`);
+}
+
 function run3SatCompressed(text) {
   const { variableCount, clauseCount, padding, clauses } = parse3Sat(text);
-  const graph = buildCompressedReductionGraph(variableCount, clauses, padding);
+  const prepared = prepareSatViaVertexCoverForHc({ variableCount, clauses }, padding);
   const lines = [];
   append(lines, "3-SAT instance:");
   append(lines, `variables = ${variableCount}`);
   append(lines, `clauses = ${clauseCount}`);
+  append(lines, `optional padding nodes = ${padding}`);
   append(lines, `Formula: ${formatFormula(clauses)}`);
   append(lines);
-  append(lines, "Compressed polynomial reduction size:");
-  append(lines, `base directed nodes = ${graph.baseDirected}`);
-  append(lines, `padding directed nodes = ${padding}`);
-  append(lines, `total directed nodes = ${graph.directedCount}`);
-  append(lines, `undirected HC nodes = ${graph.n}`);
-
-  const forced = findDegreeTwoForcedEdges(graph.edge, graph.n);
-  append(lines);
-  append(lines, "Degree-2 forced-edge precheck:");
-  append(lines, `vertices with exactly two HC edges = ${forced.forcedVertexCount}`);
-  append(lines, `forced HC edges = ${forced.forcedEdgeCount}`);
-  append(lines, `forced edge total = ${formatNumber(forced.forcedEdgeTotal)}`);
-
-  append(lines);
-  const hc = runCompressedHcDecision(graph, "3-SAT compressed HC reduction");
-  append(lines, hc.summary);
-  append(lines);
-  append(lines, inferredAnswerLine(hc, "Original 3-SAT", "SATISFIABLE", "UNSATISFIABLE"));
+  append(lines, "Reduction used:");
+  append(lines, "3-SAT -> classic Vertex Cover clause triangles -> direct Hamiltonian Cycle");
+  appendSatViaVertexCoverHcReduction(lines, prepared, "3-SAT via classic Vertex Cover HC reduction", "Original 3-SAT", "SATISFIABLE", "UNSATISFIABLE", () => {
+    const limit = witnessDisplayLimit();
+    const assignments = collectSatisfyingAssignments(variableCount, clauses, limit);
+    if (assignments.length === 0) {
+      return ["satisfying assignment witness unavailable even though HC returned YES"];
+    }
+    return [
+      `assignments shown = ${assignments.length} / limit ${limit}`,
+      ...assignments.map((assignment, index) => `${index + 1}. assignment = ${formatSatAssignmentWitness(assignment, variableCount)}`)
+    ];
+  });
   return lines.join("\n");
-}
-
-function estimateCompressedReductionGraph(variableCount, clauses, padding) {
-  const clauseCount = clauses.length;
-  const occurrences = Array.from({ length: variableCount }, () => []);
-  for (let clauseIndex = 0; clauseIndex < clauseCount; clauseIndex++) {
-    for (const literal of clauses[clauseIndex]) {
-      occurrences[Math.abs(literal) - 1].push({ clauseIndex, literal });
-    }
-  }
-
-  const variableStart = Array(variableCount + 1).fill(0);
-  const variableSlotCount = Array(variableCount).fill(0);
-  let nextNode = 1;
-  for (let variable = 0; variable < variableCount; variable++) {
-    variableStart[variable] = nextNode;
-    variableSlotCount[variable] = Math.max(2, occurrences[variable].length + 1);
-    nextNode += variableSlotCount[variable];
-  }
-  variableStart[variableCount] = nextNode;
-  nextNode += clauseCount;
-
-  const source = nextNode;
-  const target = nextNode + 1;
-  const baseDirected = nextNode + 1;
-  const directedCount = baseDirected + padding;
-  const indegree = Array(directedCount + 1).fill(0);
-  const outdegree = Array(directedCount + 1).fill(0);
-  const arcs = [];
-  const addArc = (from, to) => {
-    outdegree[from] += 1;
-    indegree[to] += 1;
-    arcs.push([from, to]);
-  };
-  const slotNode = (variableIndex, slotIndex) => variableStart[variableIndex] + slotIndex;
-  const clauseNode = clauseIndex => variableStart[variableCount] + clauseIndex;
-
-  addArc(source, slotNode(0, 0));
-  addArc(source, slotNode(0, variableSlotCount[0] - 1));
-
-  for (let variable = 0; variable < variableCount; variable++) {
-    for (let slot = 1; slot < variableSlotCount[variable]; slot++) {
-      addArc(slotNode(variable, slot - 1), slotNode(variable, slot));
-      addArc(slotNode(variable, slot), slotNode(variable, slot - 1));
-    }
-
-    if (variable + 1 < variableCount) {
-      const leftEnd = slotNode(variable, 0);
-      const rightEnd = slotNode(variable, variableSlotCount[variable] - 1);
-      const nextLeft = slotNode(variable + 1, 0);
-      const nextRight = slotNode(variable + 1, variableSlotCount[variable + 1] - 1);
-      addArc(leftEnd, nextLeft);
-      addArc(leftEnd, nextRight);
-      addArc(rightEnd, nextLeft);
-      addArc(rightEnd, nextRight);
-    } else {
-      addArc(slotNode(variable, 0), target);
-      addArc(slotNode(variable, variableSlotCount[variable] - 1), target);
-    }
-  }
-
-  for (let variable = 0; variable < variableCount; variable++) {
-    for (let occurrenceIndex = 0; occurrenceIndex < occurrences[variable].length; occurrenceIndex++) {
-      const occurrence = occurrences[variable][occurrenceIndex];
-      const before = slotNode(variable, occurrenceIndex);
-      const after = slotNode(variable, occurrenceIndex + 1);
-      const clauseVertex = clauseNode(occurrence.clauseIndex);
-      if (occurrence.literal > 0) {
-        addArc(before, clauseVertex);
-        addArc(clauseVertex, after);
-      } else {
-        addArc(after, clauseVertex);
-        addArc(clauseVertex, before);
-      }
-    }
-  }
-
-  if (padding === 0) {
-    addArc(target, source);
-  } else {
-    const firstPadding = baseDirected + 1;
-    addArc(target, firstPadding);
-    for (let vertex = firstPadding; vertex < directedCount; vertex++) addArc(vertex, vertex + 1);
-    addArc(directedCount, source);
-  }
-
-  let forcedVertexCount = directedCount;
-  const inGadgetDegree = Array(directedCount + 1).fill(0);
-  const outGadgetDegree = Array(directedCount + 1).fill(0);
-  for (let vertex = 1; vertex <= directedCount; vertex++) {
-    inGadgetDegree[vertex] = 1 + indegree[vertex];
-    outGadgetDegree[vertex] = 1 + outdegree[vertex];
-    if (inGadgetDegree[vertex] === 2) forcedVertexCount += 1;
-    if (outGadgetDegree[vertex] === 2) forcedVertexCount += 1;
-  }
-  let forcedArcEdges = 0;
-  for (const [from, to] of arcs) {
-    if (outGadgetDegree[from] === 2 || inGadgetDegree[to] === 2) forcedArcEdges += 1;
-  }
-  const forcedEdgeCount = (2 * directedCount) + forcedArcEdges;
-  return {
-    n: 3 * directedCount,
-    baseDirected,
-    directedCount,
-    arcCount: arcs.length,
-    forcedVertexCount,
-    forcedEdgeCount,
-    forcedEdgeTotal: -forcedEdgeCount
-  };
-}
-
-function buildCompressedReductionGraph(variableCount, clauses, padding) {
-  const clauseCount = clauses.length;
-  const occurrences = Array.from({ length: variableCount }, () => []);
-  for (let clauseIndex = 0; clauseIndex < clauseCount; clauseIndex++) {
-    for (const literal of clauses[clauseIndex]) {
-      occurrences[Math.abs(literal) - 1].push({ clauseIndex, literal });
-    }
-  }
-
-  const variableStart = Array(variableCount + 1).fill(0);
-  const variableSlotCount = Array(variableCount).fill(0);
-  let nextNode = 1;
-  for (let variable = 0; variable < variableCount; variable++) {
-    variableStart[variable] = nextNode;
-    variableSlotCount[variable] = Math.max(2, occurrences[variable].length + 1);
-    nextNode += variableSlotCount[variable];
-  }
-  variableStart[variableCount] = nextNode;
-  nextNode += clauseCount;
-
-  const source = nextNode;
-  const target = nextNode + 1;
-  const baseDirected = nextNode + 1;
-  const directedCount = baseDirected + padding;
-  const arcs = Array.from({ length: directedCount + 1 }, () => []);
-  const addArc = (from, to) => {
-    arcs[from].push(to);
-  };
-  const slotNode = (variableIndex, slotIndex) => variableStart[variableIndex] + slotIndex;
-  const clauseNode = clauseIndex => variableStart[variableCount] + clauseIndex;
-
-  addArc(source, slotNode(0, 0), "decision");
-  addArc(source, slotNode(0, variableSlotCount[0] - 1), "decision");
-
-  for (let variable = 0; variable < variableCount; variable++) {
-    for (let slot = 1; slot < variableSlotCount[variable]; slot++) {
-      addArc(slotNode(variable, slot - 1), slotNode(variable, slot), "structural");
-      addArc(slotNode(variable, slot), slotNode(variable, slot - 1), "structural");
-    }
-
-    if (variable + 1 < variableCount) {
-      const leftEnd = slotNode(variable, 0);
-      const rightEnd = slotNode(variable, variableSlotCount[variable] - 1);
-      const nextLeft = slotNode(variable + 1, 0);
-      const nextRight = slotNode(variable + 1, variableSlotCount[variable + 1] - 1);
-      addArc(leftEnd, nextLeft, "decision");
-      addArc(leftEnd, nextRight, "decision");
-      addArc(rightEnd, nextLeft, "decision");
-      addArc(rightEnd, nextRight, "decision");
-    } else {
-      addArc(slotNode(variable, 0), target, "structural");
-      addArc(slotNode(variable, variableSlotCount[variable] - 1), target, "structural");
-    }
-  }
-
-  for (let variable = 0; variable < variableCount; variable++) {
-    for (let occurrenceIndex = 0; occurrenceIndex < occurrences[variable].length; occurrenceIndex++) {
-      const occurrence = occurrences[variable][occurrenceIndex];
-      const before = slotNode(variable, occurrenceIndex);
-      const after = slotNode(variable, occurrenceIndex + 1);
-      const clauseVertex = clauseNode(occurrence.clauseIndex);
-      if (occurrence.literal > 0) {
-        addArc(before, clauseVertex, "decision");
-        addArc(clauseVertex, after, "decision");
-      } else {
-        addArc(after, clauseVertex, "decision");
-        addArc(clauseVertex, before, "decision");
-      }
-    }
-  }
-
-  if (padding === 0) {
-    addArc(target, source, "structural");
-  } else {
-    const firstPadding = baseDirected + 1;
-    addArc(target, firstPadding, "structural");
-    for (let vertex = firstPadding; vertex < directedCount; vertex++) addArc(vertex, vertex + 1, "structural");
-    addArc(directedCount, source, "structural");
-  }
-
-  const n = 3 * directedCount;
-  const edge = makeMatrix(n);
-  const allowedEdgeKeys = new Set();
-  const gadgetIn = vertex => (3 * vertex) - 2;
-  const gadgetMid = vertex => (3 * vertex) - 1;
-  const gadgetOut = vertex => 3 * vertex;
-  const addUndirected = (from, to) => {
-    edge[from][to] = -1;
-    edge[to][from] = -1;
-    allowedEdgeKeys.add(edgeKey(from, to));
-  };
-  for (let vertex = 1; vertex <= directedCount; vertex++) {
-    addUndirected(gadgetIn(vertex), gadgetMid(vertex));
-    addUndirected(gadgetMid(vertex), gadgetOut(vertex));
-  }
-  for (let from = 1; from <= directedCount; from++) {
-    for (const to of arcs[from]) addUndirected(gadgetOut(from), gadgetIn(to));
-  }
-  return { edge, n, baseDirected, directedCount, allowedEdgeKeys };
 }
 
 function findDegreeTwoForcedEdges(edge, n) {
@@ -3389,11 +4674,95 @@ async function loadFileInto(fileInput, textareaId) {
   document.getElementById(textareaId).value = await file.text();
 }
 
+function compactRunOutput(text, elapsedMs) {
+  const sourceLines = String(text || "").split(/\r?\n/);
+  const lines = [];
+  const seen = new Set();
+  const add = line => {
+    if (!line && lines[lines.length - 1] === "") return;
+    const key = line.trim();
+    if (key && seen.has(key)) return;
+    if (key) seen.add(key);
+    lines.push(line);
+  };
+
+  const finalIndex = sourceLines.findIndex(line => line.trim() === "Final answer:");
+  if (finalIndex >= 0) {
+    for (let index = finalIndex; index < sourceLines.length; index++) {
+      const line = sourceLines[index];
+      const next = sourceLines[index + 1] || "";
+      if (index > finalIndex && line.trim() === "" && next.startsWith("NP-douce HC solver result:")) break;
+      add(line);
+    }
+  } else {
+    const decision = sourceLines.find(line => line.includes("HC decision:"));
+    const totalCost = sourceLines.find(line => line.startsWith("Total tour cost =") || line.startsWith("HC tour cost ="));
+    add("Final answer:");
+    if (decision) add(decision);
+    else if (totalCost) add(totalCost);
+    else return text;
+  }
+
+  for (let index = 0; index < sourceLines.length; index++) {
+    const line = sourceLines[index];
+    if (!/witness/i.test(line)) continue;
+    add("");
+    add(line);
+    for (let witnessIndex = index + 1; witnessIndex < sourceLines.length; witnessIndex++) {
+      const witnessLine = sourceLines[witnessIndex];
+      if (witnessLine.trim() === "") break;
+      add(witnessLine);
+    }
+  }
+
+  const nodePatterns = [
+    /^HC nodes = /,
+    /^undirected HC nodes = /,
+    /^estimated HC nodes after Vertex Cover gadget = /,
+    /^n = /,
+    /nodes is above/
+  ];
+  const metricPatterns = [
+    /^HC backtrack tries = /,
+    /^backtrack try limit = /,
+    /^requested backtrack tries = /,
+    /^HC tour cost = /,
+    /^HC target cost = /,
+    /^HC best partial tour cost = /,
+    /^minimum tour cost found = /,
+    /^distinct minimum tours found within try limit = /
+  ];
+
+  const metrics = [];
+  const metricSeen = new Set();
+  for (const line of sourceLines) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (!nodePatterns.some(pattern => pattern.test(trimmed)) &&
+        !metricPatterns.some(pattern => pattern.test(trimmed))) {
+      continue;
+    }
+    if (metricSeen.has(trimmed)) continue;
+    metricSeen.add(trimmed);
+    metrics.push(trimmed);
+  }
+
+  if (metrics.length > 0) {
+    add("");
+    add("Run summary:");
+    metrics.forEach(add);
+  }
+  add(`elapsed time = ${formatNumber(elapsedMs / 1000)} seconds`);
+  return lines.join("\n").trim();
+}
+
 function runSafely(fn) {
   write("Running...");
   setTimeout(() => {
+    const started = performance.now();
     try {
-      write(fn());
+      const text = fn();
+      write(compactRunOutput(text, performance.now() - started));
     } catch (error) {
       write(`Error: ${error.message}`);
     }
@@ -3443,33 +4812,45 @@ document.getElementById("packingBoxRows").addEventListener("click", event => {
 document.getElementById("runPacking3d").addEventListener("click", () => runSafely(() => runPacking3d()));
 document.getElementById("runPairs").addEventListener("click", () => runSafely(() => {
   const { edge, n } = parsePairs(document.getElementById("pairsInput").value);
-  return runTrackingSolver(edge, n, Number(document.getElementById("pairsBeta").value), "browser pairs input", {
+  return runTrackingSolver(edge, n, NaN, "browser pairs input", {
     forceDegreeTwo: true,
     completeWithNeutralEdges: true,
     repairPasses: getHcRepairPasses(),
-    backtrackLimit: getHcBacktrackTries()
+    backtrackLimit: getHcBacktrackTries(),
+    adaptiveBeta: true,
+    betaMultiplier: 1,
+    scoreMethod: "importance"
   });
 }));
 document.getElementById("runMatrix").addEventListener("click", () => runSafely(() => {
   const { edge, n } = parseMatrix(document.getElementById("matrixInput").value);
-  return runTrackingSolver(edge, n, Number(document.getElementById("matrixBeta").value), "browser matrix input", {
+  return runTrackingSolver(edge, n, NaN, "browser matrix input", {
     repairPasses: getHcRepairPasses(),
-    backtrackLimit: getHcBacktrackTries()
+    backtrackLimit: getHcBacktrackTries(),
+    adaptiveBeta: true,
+    betaMultiplier: 1,
+    scoreMethod: "importance"
   });
 }));
 document.getElementById("runPoints").addEventListener("click", () => runSafely(() => {
   const { edge, n } = parsePoints(document.getElementById("pointsInput").value);
-  return runTrackingSolver(edge, n, Number(document.getElementById("pointsBeta").value), "browser points input", {
+  return runTrackingSolver(edge, n, NaN, "browser points input", {
     scoreZeroEdges: true,
     repairPasses: getHcRepairPasses(),
-    backtrackLimit: getHcBacktrackTries()
+    backtrackLimit: getHcBacktrackTries(),
+    adaptiveBeta: true,
+    betaMultiplier: 1,
+    scoreMethod: "importance"
   });
 }));
 document.getElementById("runManual").addEventListener("click", () => runSafely(() => {
   const { edge, n } = parseManual(document.getElementById("manualInput").value);
-  return runTrackingSolver(edge, n, Number(document.getElementById("manualBeta").value), "browser manual input", {
+  return runTrackingSolver(edge, n, NaN, "browser manual input", {
     repairPasses: getHcRepairPasses(),
-    backtrackLimit: getHcBacktrackTries()
+    backtrackLimit: getHcBacktrackTries(),
+    adaptiveBeta: true,
+    betaMultiplier: 1,
+    scoreMethod: "importance"
   });
 }));
 
