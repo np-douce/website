@@ -32,19 +32,19 @@ Reduction tabs now use this strict flow for their displayed answer:
 original problem -> reduction -> HC graph -> NP-douce HC solver -> inferred original answer
 ```
 
+When the HC solver returns YES, reduction tabs print concrete original-problem witnesses, such as SAT assignments, vertex covers, cliques, independent sets, selected sets, colorings, Sudoku grids, or packing placement summaries. The displayed witness count is capped by `HC backtrack tries`. The app screen is compacted to the final answer, witness lines, node counts, key run settings, and elapsed time instead of the full solver trace.
+
 If the reduced HC graph is above the app's `HC solve node limit`, the tab reports `NOT COMPUTED` instead of using a separate direct solver. Raise the limit when you want to force a larger reduced HC instance through the solver, but large values can run very slowly.
 
 Reduction tabs run the HC solver over the full set of real allowed HC edges from the start. They still skip zero-weight non-edges, because those cannot contribute to the target `-n` Hamiltonian tour.
 
 Before a generated 3-SAT formula is sent to Vertex Cover, reduction tabs run exact unit-clause simplification. A clause like `[-3, -3, -3]` is treated as the unit clause `~x3`, so `x3=false` is forced and satisfied clauses are removed. Binary clauses are kept during simplification, then the classic Vertex Cover clause triangle duplicates one literal when a two-literal clause must become a 3-literal triangle.
 
-`HC beta multiplier` controls the beta temperature used by the reduction solver. The app computes its suggested beta from the graph variance, then multiplies it by this value, so `0.25` means one-quarter of the suggested beta.
+The HC solver now uses the importance score automatically: `lnZ(CE + e) - lnZ(CE without e)`. The older omega-only score is no longer exposed as a setting.
 
-`HC score method` can use the importance score `lnZ(CE + e) - lnZ(CE without e)` or the older omega score `lnZ(CE + e)`. The importance score is selected by default so it can be tested directly against the raw edge score.
+Adaptive beta is automatic. Each choice step recomputes the current conditioned standard deviation and uses `1 / current standard deviation`.
 
-`adaptive beta` changes beta during the HC solve. When it is on, each choice step recomputes the current conditioned standard deviation and uses `beta multiplier / current standard deviation`.
-
-`HC backtrack tries` lets the HC solver revisit close decisions. The score formula ranks every valid edge, the greedy edge is tried first, and alternate branches are kept only when their log-score is tied with the best edge up to numerical tolerance. Each choice keeps at most two smart alternatives, and the total branch limit is capped by a polynomial edge-count guard. The app defaults this to `25` because small reduction gadgets often need a few tie branches; higher values can improve accuracy but may run much slower.
+Score-guided backtracking is controlled by `HC backtrack tries`. The visible solver tuning is the HC solve node limit, `HC backtrack tries`, and `HC repair passes`.
 
 Candidate edges are normalized with the state function omega. For each valid edge, the app uses the count term `N(e) = 2^(CE - 1) * (n - 1 - VCE + CE)!`, computes `L(e) = ln(N(e)) - beta * mean + 0.5 * beta^2 * variance`, shifts by `M = max L`, then uses `P(e) = exp(L(e) - M) / omega` with `omega = sum exp(L(f) - M)`.
 

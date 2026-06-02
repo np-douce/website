@@ -34,15 +34,9 @@
     </nav>
     <div class="globalControls">
       <label>HC solve node limit<input id="hcSolveNodeLimit" type="number" min="0" step="1" value="1000"></label>
-      <label>HC beta multiplier<input id="hcBetaMultiplier" type="number" min="0.001" step="0.001" value="1"></label>
-      <label>HC score method<select id="hcScoreMethod">
-        <option value="importance" selected>Importance</option>
-        <option value="omega">Omega lnZ</option>
-      </select></label>
+      <label>HC backtrack tries<input id="hcBacktrackTries" type="number" min="0" max="500" step="1" value="25"></label>
       <label>HC repair passes<input id="hcRepairPasses" type="number" min="0" max="100" step="1" value="5"></label>
-      <label>HC backtrack tries<input id="hcBacktrackTries" type="number" min="0" max="100" step="1" value="25"></label>
-      <label class="checkLabel"><input id="hcAdaptiveBeta" type="checkbox" checked> adaptive beta</label>
-      <p class="fieldNote">Reduction tabs infer answers only when the reduced HC graph is at or under this limit. Raise it to force larger HC solves; larger values can run very slowly.</p>
+      <p class="fieldNote">Importance scoring and adaptive beta are automatic. Reduction tabs infer answers only when the reduced HC graph is at or under this limit. Backtracking retries the next best scored HC branches; larger values can run very slowly.</p>
     </div>
 
     <section class="workspace">
@@ -266,8 +260,6 @@
 2 3
 3 4
 4 1</textarea>
-        <label>Beta</label>
-        <input id="pairsBeta" type="number" step="any" value="1">
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="pairsFile" accept=".txt"></label>
           <button id="runPairs">Run pairs solver</button>
@@ -285,8 +277,6 @@
 5 0 6 0
 0 6 0 8
 7 0 8 0</textarea>
-        <label>Beta</label>
-        <input id="matrixBeta" type="number" step="any" value="1">
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="matrixFile" accept=".txt"></label>
           <button id="runMatrix">Run matrix solver</button>
@@ -304,8 +294,6 @@
 1 0
 1 1
 0 1</textarea>
-        <label>Beta</label>
-        <input id="pointsBeta" type="number" step="any" value="1">
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="pointsFile" accept=".txt"></label>
           <button id="runPoints">Run points solver</button>
@@ -325,8 +313,6 @@
 6
 0
 8</textarea>
-        <label>Beta</label>
-        <input id="manualBeta" type="number" step="any" value="1">
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="manualFile" accept=".txt"></label>
           <button id="runManual">Run manual solver</button>
