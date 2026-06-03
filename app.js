@@ -1268,6 +1268,103 @@ function selectSmartBacktrackAlternatives(ranked, maxAlternatives, options = {})
   return alternatives;
 }
 
+function sortedNumberSetSignature(values) {
+  if (!values || values.size === 0) return "";
+  return Array.from(values).sort((a, b) => a - b).join(",");
+}
+
+function numberSetsDiffer(left, right) {
+  const a = left || new Set();
+  const b = right || new Set();
+  if (a.size !== b.size) return true;
+  for (const value of a) if (!b.has(value)) return true;
+  return false;
+}
+
+function vertexCoverConsequenceSignature(beforeState, afterState) {
+  const beforeSelected = beforeState.vcSelectedVertices || new Set();
+  const beforeRejected = beforeState.vcRejectedVertices || new Set();
+  const afterSelected = afterState.vcSelectedVertices || new Set();
+  const afterRejected = afterState.vcRejectedVertices || new Set();
+  if (!numberSetsDiffer(beforeSelected, afterSelected) &&
+      !numberSetsDiffer(beforeRejected, afterRejected)) {
+    return null;
+  }
+  return `selected:${sortedNumberSetSignature(afterSelected)}|rejected:${sortedNumberSetSignature(afterRejected)}`;
+}
+
+function vertexCoverDecisionEdge(candidate, meta) {
+  if (!meta || !candidate) return false;
+  const key = edgeKey(candidate.from, candidate.to);
+  return meta.rejectionPatterns.some(pattern => pattern.crossKeys.includes(key));
+}
+
+function prepareBacktrackBranch(edge, n, branch, alternativeInfo, searchOptions) {
+  const alternative = alternativeInfo.candidate;
+  const altEndpointLink = branch.endpointLink.slice();
+  const altState = cloneSolverState(branch.state);
+  if (!applyChosenEdge(alternative.from, alternative.to, edge, altEndpointLink, altState)) return null;
+  const forced = propagateConfiguredForcedEdges(edge, n, altEndpointLink, altState, searchOptions);
+  if (altState.invalid) return null;
+  return {
+    alternativeInfo,
+    alternative,
+    endpointLink: altEndpointLink,
+    state: altState,
+    forced,
+    vcConsequenceSignature: searchOptions.vertexCoverPropagation
+      ? vertexCoverConsequenceSignature(branch.state, altState)
+      : null
+  };
+}
+
+function buildBacktrackBranches(ranked, maxAlternatives, branch, edge, n, searchOptions) {
+  const defaultAlternatives = selectSmartBacktrackAlternatives(ranked, maxAlternatives, searchOptions);
+  if (!searchOptions.vertexCoverPropagation) {
+    return defaultAlternatives
+      .map(alternativeInfo => prepareBacktrackBranch(edge, n, branch, alternativeInfo, searchOptions))
+      .filter(Boolean);
+  }
+
+  const best = ranked[0];
+  const meta = searchOptions.vertexCoverPropagation;
+  const seenConsequences = new Set();
+  const bestPreview = vertexCoverDecisionEdge(best, meta)
+    ? prepareBacktrackBranch(edge, n, branch, { candidate: best, optionIndex: 0, regret: 0 }, searchOptions)
+    : null;
+  if (bestPreview && bestPreview.vcConsequenceSignature) {
+    seenConsequences.add(bestPreview.vcConsequenceSignature);
+  }
+
+  const keyBranches = [];
+  const scanLimit = Math.min(ranked.length, 1 + Math.max(maxAlternatives * 12, 16));
+  for (let optionIndex = 1; optionIndex < scanLimit; optionIndex++) {
+    const candidate = ranked[optionIndex];
+    if (!vertexCoverDecisionEdge(candidate, meta)) continue;
+    const alternativeInfo = { candidate, optionIndex, regret: scoreRegret(best, candidate) };
+    const prepared = prepareBacktrackBranch(edge, n, branch, alternativeInfo, searchOptions);
+    if (!prepared) continue;
+
+    if (!prepared.vcConsequenceSignature ||
+        seenConsequences.has(prepared.vcConsequenceSignature)) continue;
+    seenConsequences.add(prepared.vcConsequenceSignature);
+    keyBranches.push(prepared);
+    if (keyBranches.length >= maxAlternatives) break;
+  }
+
+  if (keyBranches.length >= maxAlternatives) return keyBranches;
+  for (const alternativeInfo of defaultAlternatives) {
+    if (keyBranches.length >= maxAlternatives) break;
+    const prepared = prepareBacktrackBranch(edge, n, branch, alternativeInfo, searchOptions);
+    if (!prepared) continue;
+    if (prepared.vcConsequenceSignature &&
+        seenConsequences.has(prepared.vcConsequenceSignature)) continue;
+    if (prepared.vcConsequenceSignature) seenConsequences.add(prepared.vcConsequenceSignature);
+    keyBranches.push(prepared);
+  }
+  return keyBranches.slice(0, maxAlternatives);
+}
+
 function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, rootState, searchOptions) {
   const includeTrace = !searchOptions.compactOutput;
   const requestedTries = Math.max(1, Math.floor(searchOptions.backtrackLimit));
@@ -1336,20 +1433,24 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
       }
 
       const best = ranked[0];
-      const alternatives = selectSmartBacktrackAlternatives(ranked, alternativesPerSplit, searchOptions);
-      for (const alternativeInfo of alternatives) {
-        const alternative = alternativeInfo.candidate;
-        const altEndpointLink = branch.endpointLink.slice();
-        const altState = cloneSolverState(branch.state);
-        if (!applyChosenEdge(alternative.from, alternative.to, edge, altEndpointLink, altState)) continue;
-        const altForced = propagateConfiguredForcedEdges(edge, n, altEndpointLink, altState, searchOptions);
-        if (altState.invalid) continue;
+      const hasBacktrackRoom = explored + queue.length < maxTries;
+      const alternativeBranches = hasBacktrackRoom
+        ? buildBacktrackBranches(ranked, alternativesPerSplit, branch, edge, n, searchOptions)
+        : [];
+      for (const alternativeBranch of alternativeBranches) {
+        const alternativeInfo = alternativeBranch.alternativeInfo;
+        const alternative = alternativeBranch.alternative;
+        const altEndpointLink = alternativeBranch.endpointLink;
+        const altState = alternativeBranch.state;
         const regret = alternativeInfo.regret;
         const altTrace = includeTrace
           ? { lines: branch.trace.lines.slice(), omitted: branch.trace.omitted }
           : { lines: [], omitted: 0 };
         if (includeTrace) {
-          appendTraceLine(altTrace, `backtrack choice: Edge[${alternative.from}][${alternative.to}] ${formatCandidateChoice(alternative)} regret ${formatNumber(regret)}`);
+          const consequenceText = alternativeBranch.vcConsequenceSignature
+            ? ` VC ${alternativeBranch.vcConsequenceSignature}`
+            : "";
+          appendTraceLine(altTrace, `backtrack choice: Edge[${alternative.from}][${alternative.to}] ${formatCandidateChoice(alternative)} regret ${formatNumber(regret)}${consequenceText}`);
         }
         queue.push({
           endpointLink: altEndpointLink,
