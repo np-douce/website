@@ -1519,6 +1519,11 @@ function forceVertexCoverSelected(vertex, meta, edge, endpointLink, state, chose
   if (!state.vcSelectedVertices.has(vertex)) {
     state.vcSelectedVertices.add(vertex);
     result.selectedVertexCount += 1;
+    if (state.vcSelectedVertices.size > meta.coverLimit) {
+      state.invalid = true;
+      state.invalidReason = `Vertex Cover propagation selected more than k=${meta.coverLimit} vertices.`;
+      return result;
+    }
   }
 
   const connectors = meta.connectorEdgesByVertex[vertex] || [];
@@ -1559,6 +1564,21 @@ function forceVertexCoverRejected(vertex, meta, edge, endpointLink, state, chose
   return result;
 }
 
+function forceVertexCoverPatternPath(pattern, edge, endpointLink, state, chosenKeys) {
+  const result = { forcedEdgeCount: 0 };
+  for (const pathEdge of pattern.pathEdges) {
+    if (chosenKeys.has(pathEdge.key)) continue;
+    if (!applyChosenEdge(pathEdge.from, pathEdge.to, edge, endpointLink, state)) {
+      state.invalid = true;
+      state.invalidReason = `Vertex Cover propagation could not force gadget path Edge[${pathEdge.from}][${pathEdge.to}].`;
+      return result;
+    }
+    chosenKeys.add(pathEdge.key);
+    result.forcedEdgeCount += 1;
+  }
+  return result;
+}
+
 function applyVertexCoverGadgetPropagation(edge, n, endpointLink, state, meta) {
   const total = {
     selectedVertexCount: 0,
@@ -1569,16 +1589,12 @@ function applyVertexCoverGadgetPropagation(edge, n, endpointLink, state, meta) {
   ensureVertexCoverPropagationState(state);
   const chosenKeys = chosenEdgeKeySet(state);
 
-  for (const [key, vertex] of meta.selectedTriggerByEdgeKey.entries()) {
-    if (!chosenKeys.has(key)) continue;
-    const selected = forceVertexCoverSelected(vertex, meta, edge, endpointLink, state, chosenKeys);
-    total.selectedVertexCount += selected.selectedVertexCount;
-    total.forcedEdgeCount += selected.forcedEdgeCount;
-    if (state.invalid) return total;
-  }
-
   for (const pattern of meta.rejectionPatterns) {
-    if (!chosenKeys.has(pattern.crossKeys[0]) || !chosenKeys.has(pattern.crossKeys[1])) continue;
+    if (!pattern.crossKeys.some(key => chosenKeys.has(key))) continue;
+    const forcedPath = forceVertexCoverPatternPath(pattern, edge, endpointLink, state, chosenKeys);
+    total.forcedEdgeCount += forcedPath.forcedEdgeCount;
+    if (state.invalid) return total;
+
     const rejected = forceVertexCoverRejected(pattern.rejectedVertex, meta, edge, endpointLink, state, chosenKeys);
     total.rejectedVertexCount += rejected.rejectedVertexCount;
     total.selectedVertexCount += rejected.selectedVertexCount;
@@ -1885,7 +1901,9 @@ function runCompressedHcDecision(graph, sourceLabel) {
 
 function inferredAnswerLine(hc, label, yesText = "YES", noText = "NO") {
   if (hc.notComputed) return `${label} answer inferred from HC: NOT COMPUTED`;
-  return hc.hamiltonianFound ? `${label} answer inferred from HC: ${yesText}` : `${label} answer inferred from HC: ${noText}`;
+  return hc.hamiltonianFound
+    ? `${label} answer inferred from HC: ${yesText}`
+    : `${label} answer inferred from HC: NOT FOUND BY HC SEARCH`;
 }
 
 function tokenizeNumbers(text) {
@@ -2369,6 +2387,16 @@ function buildDirectVertexCoverHcGraph(vertexCount, coverLimit, edges, padding =
     return key;
   };
 
+  const pathEdges = nodes => {
+    const result = [];
+    for (let index = 0; index + 1 < nodes.length; index++) {
+      const from = nodes[index];
+      const to = nodes[index + 1];
+      result.push({ from, to, key: edgeKey(from, to) });
+    }
+    return result;
+  };
+
   for (const gadget of gadgetRows) {
     neighborsByVertex[gadget.u].add(gadget.v);
     neighborsByVertex[gadget.v].add(gadget.u);
@@ -2381,14 +2409,24 @@ function buildDirectVertexCoverHcGraph(vertexCount, coverLimit, edges, padding =
     const u6ToV4 = add(gadget.uRow[5], gadget.vRow[3], true);
     const u4ToV6 = add(gadget.uRow[3], gadget.vRow[5], true);
     rejectionPatterns.push({
-      rejectedVertex: gadget.v,
-      coveringVertex: gadget.u,
-      crossKeys: [u1ToV3, u6ToV4]
-    });
-    rejectionPatterns.push({
       rejectedVertex: gadget.u,
       coveringVertex: gadget.v,
-      crossKeys: [v1ToU3, u4ToV6]
+      crossKeys: [u1ToV3, u6ToV4],
+      pathEdges: pathEdges([
+        gadget.vRow[0], gadget.vRow[1], gadget.vRow[2],
+        gadget.uRow[0], gadget.uRow[1], gadget.uRow[2], gadget.uRow[3], gadget.uRow[4], gadget.uRow[5],
+        gadget.vRow[3], gadget.vRow[4], gadget.vRow[5]
+      ])
+    });
+    rejectionPatterns.push({
+      rejectedVertex: gadget.v,
+      coveringVertex: gadget.u,
+      crossKeys: [v1ToU3, u4ToV6],
+      pathEdges: pathEdges([
+        gadget.uRow[0], gadget.uRow[1], gadget.uRow[2],
+        gadget.vRow[0], gadget.vRow[1], gadget.vRow[2], gadget.vRow[3], gadget.vRow[4], gadget.vRow[5],
+        gadget.uRow[3], gadget.uRow[4], gadget.uRow[5]
+      ])
     });
   }
 
