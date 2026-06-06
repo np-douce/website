@@ -1127,6 +1127,37 @@ function formatMinimumTourWitness(candidate, index) {
   return `${index}. cost ${costText}, ${branchText}: ${formatChosenEdgeList(candidate.chosenEdges)}`;
 }
 
+function appendTrackingTourWitnesses(lines, result, kind = "hc") {
+  const candidates = [];
+  const seen = new Set();
+  const addCandidate = candidate => {
+    if (!candidate) return;
+    if ((!candidate.tourOrder || candidate.tourOrder.length === 0) &&
+        (!candidate.chosenEdges || candidate.chosenEdges.length === 0)) return;
+    const signature = candidateTourSignature(candidate);
+    if (seen.has(signature)) return;
+    seen.add(signature);
+    candidates.push(candidate);
+  };
+
+  (result.bestFinals || []).forEach(addCandidate);
+  addCandidate(result);
+  if (candidates.length === 0) return;
+
+  append(lines);
+  if (kind === "hc" && result.hamiltonianFound) {
+    append(lines, `HC tours found = ${candidates.length}`);
+    append(lines, "HC tour witnesses:");
+  } else if (kind === "tsp") {
+    append(lines, `best tours found = ${candidates.length}`);
+    append(lines, "Best tour witnesses:");
+  } else {
+    append(lines, `tour witnesses found = ${candidates.length}`);
+    append(lines, "Tour witnesses:");
+  }
+  candidates.forEach((candidate, index) => append(lines, formatMinimumTourWitness(candidate, index + 1)));
+}
+
 function cloneSolverState(state) {
   return {
     ...state,
@@ -1281,7 +1312,7 @@ function numberSetsDiffer(left, right) {
   return false;
 }
 
-function vertexCoverConsequenceSignature(beforeState, afterState) {
+function vertexCoverConsequenceSignature(beforeState, afterState, meta = null) {
   const beforeSelected = beforeState.vcSelectedVertices || new Set();
   const beforeRejected = beforeState.vcRejectedVertices || new Set();
   const afterSelected = afterState.vcSelectedVertices || new Set();
@@ -1290,13 +1321,67 @@ function vertexCoverConsequenceSignature(beforeState, afterState) {
       !numberSetsDiffer(beforeRejected, afterRejected)) {
     return null;
   }
+  if (meta && meta.witnessKind === "sat") {
+    return satAssignmentConsequenceSignature(afterState, meta);
+  }
+  if (meta && meta.witnessKind === "clique") {
+    return `clique:${sortedNumberSetSignature(afterRejected)}|notClique:${sortedNumberSetSignature(afterSelected)}`;
+  }
   return `selected:${sortedNumberSetSignature(afterSelected)}|rejected:${sortedNumberSetSignature(afterRejected)}`;
+}
+
+function satAssignmentConsequenceSignature(state, meta) {
+  const literalByVertex = meta.satLiteralByVertex || [];
+  const variableCount = Math.max(0, Math.floor(Number(meta.satVariableCount || 0)));
+  if (variableCount === 0) return null;
+  const assignment = Array(variableCount + 1).fill("");
+
+  const setValue = (variable, value) => {
+    if (variable < 1 || variable > variableCount) return;
+    if (assignment[variable] && assignment[variable] !== value) {
+      assignment[variable] = "conflict";
+      return;
+    }
+    assignment[variable] = value;
+  };
+
+  const selected = state.vcSelectedVertices || new Set();
+  for (const vertex of selected) {
+    const literal = literalByVertex[vertex];
+    if (!literal) continue;
+    setValue(literal.variable, literal.sign > 0 ? "false" : "true");
+  }
+
+  const rejected = state.vcRejectedVertices || new Set();
+  for (const vertex of rejected) {
+    const literal = literalByVertex[vertex];
+    if (!literal) continue;
+    setValue(literal.variable, literal.sign > 0 ? "true" : "false");
+  }
+
+  const parts = [];
+  for (let variable = 1; variable <= variableCount; variable++) {
+    if (assignment[variable]) parts.push(`x${variable}=${assignment[variable]}`);
+  }
+  return parts.length > 0 ? `sat:${parts.join(",")}` : null;
+}
+
+function vertexCoverPatternTouchesSatLiteral(pattern, meta) {
+  const literalByVertex = meta.satLiteralByVertex || [];
+  return Boolean(literalByVertex[pattern.rejectedVertex] || literalByVertex[pattern.coveringVertex]);
 }
 
 function vertexCoverDecisionEdge(candidate, meta) {
   if (!meta || !candidate) return false;
   const key = edgeKey(candidate.from, candidate.to);
-  return meta.rejectionPatterns.some(pattern => pattern.crossKeys.includes(key));
+  if (meta.witnessKind === "sat" && meta.satDecisionEdgeKeys) {
+    return meta.satDecisionEdgeKeys.has(key);
+  }
+  if (meta.rejectionDecisionEdgeKeys) return meta.rejectionDecisionEdgeKeys.has(key);
+  return meta.rejectionPatterns.some(pattern => {
+    if (!pattern.crossKeys.includes(key)) return false;
+    return meta.witnessKind !== "sat" || vertexCoverPatternTouchesSatLiteral(pattern, meta);
+  });
 }
 
 function prepareBacktrackBranch(edge, n, branch, alternativeInfo, searchOptions) {
@@ -1313,7 +1398,7 @@ function prepareBacktrackBranch(edge, n, branch, alternativeInfo, searchOptions)
     state: altState,
     forced,
     vcConsequenceSignature: searchOptions.vertexCoverPropagation
-      ? vertexCoverConsequenceSignature(branch.state, altState)
+      ? vertexCoverConsequenceSignature(branch.state, altState, searchOptions.vertexCoverPropagation)
       : null
   };
 }
@@ -1337,7 +1422,11 @@ function buildBacktrackBranches(ranked, maxAlternatives, branch, edge, n, search
   }
 
   const keyBranches = [];
-  const scanLimit = Math.min(ranked.length, 1 + Math.max(maxAlternatives * 12, 16));
+  const scanLimit = meta.witnessKind === "clique"
+    ? ranked.length
+    : meta.witnessKind === "sat"
+      ? Math.min(ranked.length, 1 + Math.max(maxAlternatives * 24, 64))
+    : Math.min(ranked.length, 1 + Math.max(maxAlternatives * 12, 16));
   for (let optionIndex = 1; optionIndex < scanLimit; optionIndex++) {
     const candidate = ranked[optionIndex];
     if (!vertexCoverDecisionEdge(candidate, meta)) continue;
@@ -1353,6 +1442,7 @@ function buildBacktrackBranches(ranked, maxAlternatives, branch, edge, n, search
   }
 
   if (keyBranches.length >= maxAlternatives) return keyBranches;
+  if (meta.witnessKind === "sat" && keyBranches.length > 0) return keyBranches;
   for (const alternativeInfo of defaultAlternatives) {
     if (keyBranches.length >= maxAlternatives) break;
     const prepared = prepareBacktrackBranch(edge, n, branch, alternativeInfo, searchOptions);
@@ -1385,6 +1475,7 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
   let bestFinal = null;
   let bestFinals = [];
   let bestFinalSignatures = new Set();
+  let stoppedAtFirstHamiltonian = false;
 
   const sameCost = (left, right) =>
     Number.isFinite(left.totalTourCost) &&
@@ -1507,10 +1598,15 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
     } else if (isSameBestFinal(candidate, bestFinal)) {
       rememberBestFinal(candidate);
     }
+    if (candidate.hamiltonianFound && searchOptions.stopAtFirstHamiltonian) {
+      stoppedAtFirstHamiltonian = true;
+      break;
+    }
   }
 
   const lines = includeTrace ? [] : null;
   append(lines, "Score-guided backtracking:");
+  append(lines, `HC tour search mode = ${searchOptions.stopAtFirstHamiltonian ? "stop at first HC tour" : "search all tries"}`);
   append(lines, `backtrack try limit = ${maxTries}`);
   append(lines, `requested backtrack tries = ${requestedTries}`);
   append(lines, `polynomial branch cap = ${polynomialBranchCap}`);
@@ -1518,6 +1614,7 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
   append(lines, `branches queued = ${queued}`);
   append(lines, `smart alternatives per split cap = ${alternativesPerSplit}`);
   append(lines, `smart backtrack log tolerance = ${formatNumber(searchOptions.smartBacktrackLogTolerance ?? 1e-9)}`);
+  if (stoppedAtFirstHamiltonian) append(lines, "stopped after first HC tour = yes");
   append(lines, `best branch penalty = ${formatNumber(bestFinal ? bestFinal.penalty : 0)}`);
   append(lines, `best branch stopped because = ${bestFinal ? bestFinal.stoppedBecause : "none"}`);
   if (bestFinal && Number.isFinite(bestFinal.totalTourCost)) {
@@ -1537,7 +1634,11 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
       lines,
       totalTourCost: bestFinal.totalTourCost,
       partialTourCost: bestFinal.totalTourCost,
-      hamiltonianFound: bestFinal.hamiltonianFound
+      hamiltonianFound: bestFinal.hamiltonianFound,
+      chosenEdges: bestFinal.chosenEdges,
+      tourOrder: bestFinal.tourOrder,
+      bestFinals,
+      stoppedAtFirstHamiltonian
     };
   }
   if (!bestFinal) append(lines, "No branch was completed.");
@@ -1546,9 +1647,13 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
       lines: lines || [],
       totalTourCost: bestFinal.totalTourCost,
       partialTourCost: bestFinal.totalTourCost,
-      hamiltonianFound: bestFinal.hamiltonianFound
+      hamiltonianFound: bestFinal.hamiltonianFound,
+      chosenEdges: bestFinal.chosenEdges,
+      tourOrder: bestFinal.tourOrder,
+      bestFinals,
+      stoppedAtFirstHamiltonian
     }
-    : { lines: lines || [], totalTourCost: NaN, partialTourCost: NaN, hamiltonianFound: false };
+    : { lines: lines || [], totalTourCost: NaN, partialTourCost: NaN, hamiltonianFound: false, bestFinals: [] };
 }
 
 function applyDegreeTwoForcedEdges(edge, n, endpointLink, state) {
@@ -1841,6 +1946,10 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
       totalTourCost: search.totalTourCost,
       partialTourCost: search.partialTourCost,
       hamiltonianFound: search.hamiltonianFound,
+      chosenEdges: search.chosenEdges,
+      tourOrder: search.tourOrder,
+      bestFinals: search.bestFinals || [],
+      stoppedAtFirstHamiltonian: search.stoppedAtFirstHamiltonian,
       moments
     };
   }
@@ -1896,19 +2005,27 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
     text: lines ? lines.join("\n") : "",
     totalTourCost,
     hamiltonianFound,
+    chosenEdges: finished.chosenEdges,
+    tourOrder: finished.tourOrder,
+    bestFinals: [finished],
     moments
   };
 }
 
 function runTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
   const result = solveTrackingSolver(edge, n, beta, sourceLabel, { ...options, compactOutput: true });
+  const isTspStyle = options.tourKind === "tsp";
   const lines = [];
   append(lines, "Final answer:");
-  append(lines, result.hamiltonianFound ? "HC decision: HAMILTONIAN CYCLE FOUND" : "HC decision: HAMILTONIAN CYCLE NOT FOUND");
+  append(lines, isTspStyle
+    ? "Best tour result: TOUR FOUND"
+    : (result.hamiltonianFound ? "HC decision: HAMILTONIAN CYCLE FOUND" : "HC decision: HAMILTONIAN CYCLE NOT FOUND"));
   append(lines, `HC nodes = ${n}`);
   append(lines, `HC backtrack tries = ${Math.max(0, Math.floor(Number(options.backtrackLimit || 0)))}`);
-  if (Number.isFinite(result.totalTourCost)) append(lines, `HC tour cost = ${formatNumber(result.totalTourCost)}`);
-  if (Number.isFinite(result.partialTourCost) && !Number.isFinite(result.totalTourCost)) append(lines, `HC best partial tour cost = ${formatNumber(result.partialTourCost)}`);
+  if (options.stopAtFirstHamiltonian) append(lines, "HC tour search mode = stop at first HC tour");
+  if (Number.isFinite(result.totalTourCost)) append(lines, `${isTspStyle ? "best tour cost" : "HC tour cost"} = ${formatNumber(result.totalTourCost)}`);
+  if (Number.isFinite(result.partialTourCost) && !Number.isFinite(result.totalTourCost)) append(lines, `${isTspStyle ? "best partial tour cost" : "HC best partial tour cost"} = ${formatNumber(result.partialTourCost)}`);
+  appendTrackingTourWitnesses(lines, result, options.tourKind || "hc");
   return lines.join("\n");
 }
 
@@ -1948,6 +2065,15 @@ function getHcBacktrackTries() {
   return Math.floor(value);
 }
 
+function getHcTourSearchMode() {
+  const input = document.getElementById("hcTourSearchMode");
+  return input && input.value === "first" ? "first" : "all";
+}
+
+function shouldStopAtFirstHcTour() {
+  return getHcTourSearchMode() === "first";
+}
+
 function runCompressedHcDecision(graph, sourceLabel) {
   const limit = getHcSolveNodeLimit();
   const backtrackTries = getHcBacktrackTries();
@@ -1972,6 +2098,7 @@ function runCompressedHcDecision(graph, sourceLabel) {
     vertexCoverPropagation: graph.vertexCoverPropagation || null,
     repairPasses: getHcRepairPasses(),
     backtrackLimit: backtrackTries,
+    stopAtFirstHamiltonian: shouldStopAtFirstHcTour(),
     completeWithNeutralEdges: true,
     adaptiveBeta: true,
     betaMultiplier: 1,
@@ -1983,6 +2110,7 @@ function runCompressedHcDecision(graph, sourceLabel) {
   append(lines, `HC nodes = ${graph.n}`);
   if (graph.allowedEdgeKeys) append(lines, `allowed HC edges scored = ${graph.allowedEdgeKeys.size}`);
   if (graph.vertexCoverPropagation) append(lines, "VC gadget propagation = on");
+  append(lines, `HC tour search mode = ${shouldStopAtFirstHcTour() ? "stop at first HC tour" : "search all tries"}`);
   append(lines, "HC score method = importance (automatic)");
   append(lines, "HC adaptive beta = on (automatic)");
   append(lines, `HC backtrack tries = ${backtrackTries}`);
@@ -2572,6 +2700,11 @@ function buildDirectVertexCoverHcGraph(vertexCount, coverLimit, edges, padding =
     }
   }
 
+  const rejectionDecisionEdgeKeys = new Set();
+  for (const pattern of rejectionPatterns) {
+    pattern.crossKeys.forEach(key => rejectionDecisionEdgeKeys.add(key));
+  }
+
   attachEdgeListAdjacency(allowedEdges, totalNodes);
   return {
     edge,
@@ -2590,6 +2723,7 @@ function buildDirectVertexCoverHcGraph(vertexCount, coverLimit, edges, padding =
       connectorEdgesByVertex,
       neighborsByVertex: neighborsByVertex.map(neighbors => Array.from(neighbors)),
       selectedTriggerByEdgeKey,
+      rejectionDecisionEdgeKeys,
       rejectionPatterns
     }
   };
@@ -3703,6 +3837,8 @@ function estimateSatToVertexCoverReduction(variableCount, clauseCount, padding =
 
 function buildSatToVertexCoverInstance(variableCount, clauses, padding = 0) {
   const edges = [];
+  const totalVertices = (2 * variableCount) + (3 * clauses.length);
+  const satLiteralByVertex = Array(totalVertices + 1).fill(null);
   const add = (u, v) => {
     if (u === v) return;
     edges.push([u, v]);
@@ -3712,6 +3848,8 @@ function buildSatToVertexCoverInstance(variableCount, clauses, padding = 0) {
   const literalVertex = literal => literal > 0 ? positiveVertex(literal) : negativeVertex(-literal);
 
   for (let variable = 1; variable <= variableCount; variable++) {
+    satLiteralByVertex[positiveVertex(variable)] = { variable, sign: 1 };
+    satLiteralByVertex[negativeVertex(variable)] = { variable, sign: -1 };
     add(positiveVertex(variable), negativeVertex(variable));
   }
 
@@ -3730,12 +3868,13 @@ function buildSatToVertexCoverInstance(variableCount, clauses, padding = 0) {
   }
 
   return {
-    n: (2 * variableCount) + (3 * clauses.length),
+    n: totalVertices,
     k: variableCount + (2 * clauses.length),
     padding,
     edges,
     variableCount,
-    clauseCount: clauses.length
+    clauseCount: clauses.length,
+    satLiteralByVertex
   };
 }
 
@@ -3759,6 +3898,15 @@ function prepareSatViaVertexCoverForHc(sat, padding, materializeLimit = getHcSol
 
   const vertexCover = buildSatToVertexCoverInstance(simplified.variableCount, simplified.clauses, padding);
   const graph = buildDirectVertexCoverHcGraph(vertexCover.n, vertexCover.k, vertexCover.edges, padding);
+  if (graph.vertexCoverPropagation) {
+    graph.vertexCoverPropagation.satLiteralByVertex = vertexCover.satLiteralByVertex;
+    graph.vertexCoverPropagation.satVariableCount = vertexCover.variableCount;
+    graph.vertexCoverPropagation.satDecisionEdgeKeys = new Set();
+    for (const pattern of graph.vertexCoverPropagation.rejectionPatterns) {
+      if (!vertexCoverPatternTouchesSatLiteral(pattern, graph.vertexCoverPropagation)) continue;
+      pattern.crossKeys.forEach(key => graph.vertexCoverPropagation.satDecisionEdgeKeys.add(key));
+    }
+  }
   return { simplified, vertexCover, graph, stats, skipped: false };
 }
 
@@ -3804,6 +3952,10 @@ function runClique(text) {
   const complementEdges = buildComplementEdges(n, edges);
   const vertexCoverK = n - k;
   const graph = vertexCoverK >= 0 ? buildDirectVertexCoverHcGraph(n, vertexCoverK, complementEdges, padding) : null;
+  if (graph && graph.vertexCoverPropagation) {
+    graph.vertexCoverPropagation.witnessKind = "clique";
+    graph.vertexCoverPropagation.witnessTargetSize = k;
+  }
 
   const lines = [];
   if (!graph) {
@@ -4525,6 +4677,10 @@ function simplify3SatForHc(variableCount, clauses) {
 function run3SatCompressed(text) {
   const { variableCount, clauseCount, padding, clauses } = parse3Sat(text);
   const prepared = prepareSatViaVertexCoverForHc({ variableCount, clauses }, padding);
+  if (prepared.graph && prepared.graph.vertexCoverPropagation) {
+    prepared.graph.vertexCoverPropagation.witnessKind = "sat";
+    prepared.graph.vertexCoverPropagation.witnessTargetSize = variableCount;
+  }
   const lines = [];
   appendSatViaVertexCoverHcReduction(lines, prepared, "3-SAT via classic Vertex Cover HC reduction", "Original 3-SAT", "SATISFIABLE", "UNSATISFIABLE", () => {
     const limit = witnessDisplayLimit();
@@ -4596,11 +4752,17 @@ function compactRunOutput(text, elapsedMs) {
   ];
   const metricPatterns = [
     /^HC backtrack tries = /,
+    /^HC tour search mode = /,
     /^backtrack try limit = /,
     /^requested backtrack tries = /,
     /^HC tour cost = /,
+    /^best tour cost = /,
     /^HC target cost = /,
     /^HC best partial tour cost = /,
+    /^best partial tour cost = /,
+    /^HC tours found = /,
+    /^best tours found = /,
+    /^tour witnesses found = /,
     /^minimum tour cost found = /,
     /^distinct minimum tours found within try limit = /
   ];
@@ -4689,6 +4851,8 @@ document.getElementById("runPairs").addEventListener("click", () => runSafely(()
     completeWithNeutralEdges: true,
     repairPasses: getHcRepairPasses(),
     backtrackLimit: getHcBacktrackTries(),
+    stopAtFirstHamiltonian: shouldStopAtFirstHcTour(),
+    tourKind: "hc",
     adaptiveBeta: true,
     betaMultiplier: 1,
     scoreMethod: "importance"
@@ -4699,6 +4863,7 @@ document.getElementById("runMatrix").addEventListener("click", () => runSafely((
   return runTrackingSolver(edge, n, NaN, "browser matrix input", {
     repairPasses: getHcRepairPasses(),
     backtrackLimit: getHcBacktrackTries(),
+    tourKind: "tsp",
     adaptiveBeta: true,
     betaMultiplier: 1,
     scoreMethod: "importance"
@@ -4710,6 +4875,7 @@ document.getElementById("runPoints").addEventListener("click", () => runSafely((
     scoreZeroEdges: true,
     repairPasses: getHcRepairPasses(),
     backtrackLimit: getHcBacktrackTries(),
+    tourKind: "tsp",
     adaptiveBeta: true,
     betaMultiplier: 1,
     scoreMethod: "importance"
@@ -4720,6 +4886,7 @@ document.getElementById("runManual").addEventListener("click", () => runSafely((
   return runTrackingSolver(edge, n, NaN, "browser manual input", {
     repairPasses: getHcRepairPasses(),
     backtrackLimit: getHcBacktrackTries(),
+    tourKind: "tsp",
     adaptiveBeta: true,
     betaMultiplier: 1,
     scoreMethod: "importance"

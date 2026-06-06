@@ -32,7 +32,7 @@ Reduction tabs now use this strict flow for their displayed answer:
 original problem -> reduction -> HC graph -> NP-douce HC solver -> inferred original answer
 ```
 
-When the HC solver returns YES, reduction tabs print concrete original-problem witnesses, such as SAT assignments, vertex covers, cliques, independent sets, selected sets, colorings, Sudoku grids, or packing placement summaries. The displayed witness count is capped by `HC backtrack tries`. The app screen is compacted to the final answer, witness lines, node counts, key run settings, and elapsed time instead of the full solver trace. Verbose preambles, hidden edge/formula manifests, and duplicate display-only prechecks are skipped so compact runs do less formatting work.
+When the HC solver returns YES, reduction tabs print concrete original-problem witnesses, such as SAT assignments, vertex covers, cliques, independent sets, selected sets, colorings, Sudoku grids, or packing placement summaries. The displayed witness count is capped by `HC backtrack tries`. Raw HC and TSP-style tabs also print the best tour order, not just the tour weight. The app screen is compacted to the final answer, witness lines, node counts, key run settings, and elapsed time instead of the full solver trace. Verbose preambles, hidden edge/formula manifests, and duplicate display-only prechecks are skipped so compact runs do less formatting work.
 
 If the reduced HC graph is above the app's `HC solve node limit`, the tab reports `NOT COMPUTED` instead of using a separate direct solver. Raise the limit when you want to force a larger reduced HC instance through the solver, but large values can run very slowly.
 
@@ -44,7 +44,7 @@ The HC solver now uses the importance score automatically: `lnZ(CE + e) - lnZ(CE
 
 Adaptive beta is automatic. Each choice step recomputes the current conditioned standard deviation and uses `1 / current standard deviation`.
 
-Score-guided backtracking is controlled by `HC backtrack tries`. The visible solver tuning is the HC solve node limit, `HC backtrack tries`, and `HC repair passes`.
+Score-guided backtracking is controlled by `HC backtrack tries`. `HC tour search` can either stop when the first Hamiltonian tour is found or keep searching all allowed tries and list the distinct HC/minimum tours it finds. Matrix, points, and manual weighted tabs keep using the all-tries best-tour behavior. The visible solver tuning is the HC solve node limit, `HC backtrack tries`, `HC repair passes`, and `HC tour search`.
 
 Candidate edges are normalized with the state function omega. For each valid edge, the app uses the count term `N(e) = 2^(CE - 1) * (n - 1 - VCE + CE)!`, computes `L(e) = ln(N(e)) - beta * mean + 0.5 * beta^2 * variance`, shifts by `M = max L`, then uses `P(e) = exp(L(e) - M) / omega` with `omega = sum exp(L(f) - M)`.
 
