@@ -106,6 +106,8 @@ The app uses the direct classic Vertex Cover to Hamiltonian Cycle construction. 
 
 Incident rows for the same original vertex are linked as `u6 -> next u1`, so the degree-2 precheck collapses most of each gadget before the remaining selector and cross edges are scored by the HC solver.
 
+On the 3-SAT tab, the browser now scores the SAT variable witness choices first. For `V` SAT variables, that means `2V` logical witness choices. Each choice is represented by a paired HC diagonal decision; either valid diagonal commits the same VC consequence, then the gadget propagation forces the paired chain. After the SAT variables are committed, the tab checks the inferred assignment instead of spending time scoring unrelated HC completion edges.
+
 Node count for this direct reduction is roughly:
 
 ```text

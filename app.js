@@ -669,10 +669,17 @@ function rankScoringEdges(n, edge, edgeSquared, endpointLink, state, beta, candi
   const scoreMethod = options.scoreMethod === "importance" ? "importance" : "omega";
   const momentEdgeList = options.momentEdgeList || null;
   const candidateEdgeList = options.candidateEdgeList || null;
+  let candidateEdges = null;
+  if (options.preferredCandidateEdgeList && options.preferredCandidateEdgeList.length > 0) {
+    candidateEdges = collectCandidateEdges(n, edge, endpointLink, state, null, options.preferredCandidateEdgeList);
+    if (candidateEdges.length === 0) candidateEdges = null;
+  }
   const currentStats = scoreMethod === "importance"
     ? (options.currentStats || computeConditionedStateStats(n, edge, edgeSquared, endpointLink, state, momentEdgeList))
     : null;
-  const candidateEdges = collectCandidateEdges(n, edge, endpointLink, state, candidateEdgeKeys, candidateEdgeList);
+  if (!candidateEdges) {
+    candidateEdges = collectCandidateEdges(n, edge, endpointLink, state, candidateEdgeKeys, candidateEdgeList);
+  }
   for (const candidate of candidateEdges) {
     const scored = scoreCandidateEdge(n, edge, edgeSquared, endpointLink, state, beta, candidate, currentStats, scoreMethod, momentEdgeList);
     if (scored) ranked.push(scored);
@@ -1349,14 +1356,14 @@ function satAssignmentConsequenceSignature(state, meta) {
   for (const vertex of selected) {
     const literal = literalByVertex[vertex];
     if (!literal) continue;
-    setValue(literal.variable, literal.sign > 0 ? "false" : "true");
+    setValue(literal.variable, literal.sign > 0 ? "true" : "false");
   }
 
   const rejected = state.vcRejectedVertices || new Set();
   for (const vertex of rejected) {
     const literal = literalByVertex[vertex];
     if (!literal) continue;
-    setValue(literal.variable, literal.sign > 0 ? "true" : "false");
+    setValue(literal.variable, literal.sign > 0 ? "false" : "true");
   }
 
   const parts = [];
@@ -1369,6 +1376,16 @@ function satAssignmentConsequenceSignature(state, meta) {
 function vertexCoverPatternTouchesSatLiteral(pattern, meta) {
   const literalByVertex = meta.satLiteralByVertex || [];
   return Boolean(literalByVertex[pattern.rejectedVertex] || literalByVertex[pattern.coveringVertex]);
+}
+
+function vertexCoverPatternIsSatVariablePair(pattern, meta) {
+  const literalByVertex = meta.satLiteralByVertex || [];
+  const rejected = literalByVertex[pattern.rejectedVertex];
+  const covering = literalByVertex[pattern.coveringVertex];
+  return Boolean(rejected &&
+    covering &&
+    rejected.variable === covering.variable &&
+    rejected.sign !== covering.sign);
 }
 
 function vertexCoverDecisionEdge(candidate, meta) {
@@ -2086,6 +2103,11 @@ function runCompressedHcDecision(graph, sourceLabel) {
     return { text: "", summary: lines.join("\n"), totalTourCost: NaN, hamiltonianFound: false, notComputed: true };
   }
   const graphEdgeList = graph.allowedEdges || buildNonzeroEdgeList(graph.edge, graph.n);
+  const preferredCandidateEdgeList = graph.vertexCoverPropagation &&
+    graph.vertexCoverPropagation.witnessKind === "sat" &&
+    graph.vertexCoverPropagation.satDecisionEdgeKeys
+      ? graphEdgeList.filter(item => graph.vertexCoverPropagation.satDecisionEdgeKeys.has(item.key))
+      : null;
   const baseMoments = computeTheoryMomentsFromEdgeList(graphEdgeList, graph.n);
   const suggestedBeta = 1.0 / Math.sqrt(Math.max(Number.MIN_VALUE, baseMoments.tourVariance));
   const beta = suggestedBeta;
@@ -2095,6 +2117,7 @@ function runCompressedHcDecision(graph, sourceLabel) {
     allowedEdges: graph.allowedEdges || null,
     momentEdgeList: graphEdgeList,
     candidateEdgeList: graph.allowedEdges || graphEdgeList,
+    preferredCandidateEdgeList,
     vertexCoverPropagation: graph.vertexCoverPropagation || null,
     repairPasses: getHcRepairPasses(),
     backtrackLimit: backtrackTries,
@@ -2892,6 +2915,345 @@ function collectSatisfyingAssignments(variableCount, clauses, limit) {
 
   search();
   return results;
+}
+
+function copySatAssignment(assignment) {
+  return assignment ? assignment.slice() : [];
+}
+
+function convertSimplifiedAssignment(assignment, variableCount) {
+  const result = Array(variableCount + 1).fill(-1);
+  if (!assignment) return result;
+  for (let variable = 1; variable <= variableCount; variable++) {
+    if (assignment[variable] === 1) result[variable] = 1;
+    else if (assignment[variable] === -1) result[variable] = 0;
+  }
+  return result;
+}
+
+function mergeSatAssignment(target, source, variableCount) {
+  for (let variable = 1; variable <= variableCount; variable++) {
+    const value = source[variable];
+    if (value === -1 || value === undefined) continue;
+    if (target[variable] !== -1 && target[variable] !== value) return false;
+    target[variable] = value;
+  }
+  return true;
+}
+
+function countAssignedSatVariables(assignment, variableCount) {
+  let count = 0;
+  for (let variable = 1; variable <= variableCount; variable++) {
+    if (assignment[variable] !== -1) count += 1;
+  }
+  return count;
+}
+
+function satAssignmentSignature(assignment, variableCount) {
+  const parts = [];
+  for (let variable = 1; variable <= variableCount; variable++) {
+    const value = assignment[variable];
+    parts.push(value === -1 ? "?" : (value === 1 ? "1" : "0"));
+  }
+  return parts.join("");
+}
+
+function satAssignmentFromVcState(state, meta) {
+  const variableCount = Math.max(0, Math.floor(Number(meta.satVariableCount || 0)));
+  const literalByVertex = meta.satLiteralByVertex || [];
+  const assignment = Array(variableCount + 1).fill(-1);
+  let conflict = false;
+  const setValue = (variable, value) => {
+    if (variable < 1 || variable > variableCount) return;
+    if (assignment[variable] !== -1 && assignment[variable] !== value) {
+      conflict = true;
+      return;
+    }
+    assignment[variable] = value;
+  };
+
+  const selected = state.vcSelectedVertices || new Set();
+  for (const vertex of selected) {
+    const literal = literalByVertex[vertex];
+    if (!literal) continue;
+    setValue(literal.variable, literal.sign > 0 ? 1 : 0);
+  }
+
+  const rejected = state.vcRejectedVertices || new Set();
+  for (const vertex of rejected) {
+    const literal = literalByVertex[vertex];
+    if (!literal) continue;
+    setValue(literal.variable, literal.sign > 0 ? 0 : 1);
+  }
+
+  return { assignment, conflict };
+}
+
+function satValueFromCoveringLiteral(literal) {
+  return literal.sign > 0 ? 1 : 0;
+}
+
+function buildSatDecisionCandidates(graph) {
+  const meta = graph.vertexCoverPropagation;
+  if (!meta || !meta.satDecisionEdgeKeys) return [];
+  const edgeByKey = new Map((graph.allowedEdges || []).map(item => [item.key, item]));
+  const literalByVertex = meta.satLiteralByVertex || [];
+  const candidates = [];
+  const seen = new Set();
+
+  for (const pattern of meta.rejectionPatterns) {
+    const key = pattern.crossKeys[0];
+    if (!meta.satDecisionEdgeKeys.has(key) || seen.has(key)) continue;
+    const edgeChoices = pattern.crossKeys
+      .map(crossKey => edgeByKey.get(crossKey))
+      .filter(Boolean);
+    const edgeInfo = edgeChoices[0];
+    const rejected = literalByVertex[pattern.rejectedVertex];
+    const covering = literalByVertex[pattern.coveringVertex];
+    if (!edgeInfo || !rejected || !covering) continue;
+    if (rejected.variable !== covering.variable || rejected.sign === covering.sign) continue;
+    seen.add(key);
+    candidates.push({
+      ...edgeInfo,
+      variable: rejected.variable,
+      value: satValueFromCoveringLiteral(covering),
+      pattern,
+      edgeChoices
+    });
+  }
+
+  candidates.sort((a, b) => a.variable - b.variable || b.value - a.value);
+  return candidates;
+}
+
+function satDecisionEdgeAvailable(edgeInfo, edge, endpointLink) {
+  return Boolean(edgeInfo &&
+    endpointLink[edgeInfo.from] !== -1 &&
+    endpointLink[edgeInfo.to] !== -1 &&
+    endpointLink[edgeInfo.from] !== edgeInfo.to &&
+    endpointLink[edgeInfo.to] !== edgeInfo.from &&
+    edge[edgeInfo.from][edgeInfo.to] !== 0);
+}
+
+function currentSatDecisionCandidateEdges(candidates, assignment, graph, endpointLink) {
+  const result = [];
+  for (const candidate of candidates) {
+    if (assignment[candidate.variable] !== -1) continue;
+    const edgeInfo = candidate.edgeChoices.find(choice => satDecisionEdgeAvailable(choice, graph.edge, endpointLink));
+    if (!edgeInfo) continue;
+    result.push({
+      ...candidate,
+      from: edgeInfo.from,
+      to: edgeInfo.to,
+      weight: edgeInfo.weight,
+      weightSquared: edgeInfo.weightSquared,
+      key: edgeInfo.key
+    });
+  }
+  return result;
+}
+
+function satDecisionLabel(candidate) {
+  return `x${candidate.variable}=${candidate.value === 1 ? "true" : "false"}`;
+}
+
+function applySatDecisionCandidate(branch, candidate, graph, searchOptions) {
+  if (!applyChosenEdge(candidate.from, candidate.to, graph.edge, branch.endpointLink, branch.state)) {
+    branch.state.invalid = true;
+    branch.state.invalidReason = `SAT witness choice ${satDecisionLabel(candidate)} could not be applied.`;
+    return false;
+  }
+  const forced = propagateConfiguredForcedEdges(graph.edge, graph.n, branch.endpointLink, branch.state, searchOptions);
+  if (branch.state.invalid) return false;
+
+  const inferred = satAssignmentFromVcState(branch.state, searchOptions.vertexCoverPropagation);
+  if (inferred.conflict || !mergeSatAssignment(branch.assignment, inferred.assignment, searchOptions.satVariableCount)) {
+    branch.state.invalid = true;
+    branch.state.invalidReason = `SAT witness choice ${satDecisionLabel(candidate)} conflicts with an earlier witness choice.`;
+    return false;
+  }
+  branch.decisions.push({
+    variable: candidate.variable,
+    value: candidate.value,
+    edge: { from: candidate.from, to: candidate.to },
+    forcedEdges: forced.forcedEdgeCount
+  });
+  return true;
+}
+
+function cloneSatDecisionBranch(branch) {
+  return {
+    endpointLink: branch.endpointLink.slice(),
+    state: cloneSolverState(branch.state),
+    assignment: copySatAssignment(branch.assignment),
+    decisions: branch.decisions.slice(),
+    penalty: branch.penalty,
+    lastAdaptiveBeta: branch.lastAdaptiveBeta
+  };
+}
+
+function prepareSatDecisionAlternative(branch, rankedInfo, graph, searchOptions, clauses) {
+  const candidate = rankedInfo.satDecision;
+  const alternative = cloneSatDecisionBranch(branch);
+  alternative.penalty = branch.penalty + scoreRegret(rankedInfo.best, rankedInfo.candidate) + (rankedInfo.optionIndex * 1e-9);
+  if (!applySatDecisionCandidate(alternative, candidate, graph, searchOptions)) return null;
+  if (!partialFormulaCanStillBeSatisfied(clauses, alternative.assignment)) return null;
+  return alternative;
+}
+
+function runSatWitnessHcDecisionSearch(prepared, originalVariableCount, originalClauses) {
+  const graph = prepared.graph;
+  const meta = graph.vertexCoverPropagation;
+  const variableCount = Math.max(originalVariableCount, prepared.simplified.variableCount || originalVariableCount);
+  meta.witnessKind = "sat";
+  meta.witnessTargetSize = variableCount;
+  meta.satVariableCount = variableCount;
+
+  const graphEdgeList = graph.allowedEdges || buildNonzeroEdgeList(graph.edge, graph.n);
+  attachEdgeListAdjacency(graphEdgeList, graph.n);
+  const satDecisionCandidates = buildSatDecisionCandidates(graph);
+  const baseMoments = computeTheoryMomentsFromEdgeList(graphEdgeList, graph.n);
+  const beta = 1.0 / Math.sqrt(Math.max(Number.MIN_VALUE, baseMoments.tourVariance));
+  const requestedTries = Math.max(1, Math.floor(getHcBacktrackTries()));
+  const searchOptions = {
+    forceDegreeTwo: true,
+    allowedEdgeKeys: graph.allowedEdgeKeys || null,
+    allowedEdges: graph.allowedEdges || null,
+    momentEdgeList: graphEdgeList,
+    vertexCoverPropagation: meta,
+    effectiveBeta: beta,
+    adaptiveBeta: true,
+    betaMultiplier: 1,
+    scoreMethod: "importance",
+    satVariableCount: variableCount
+  };
+
+  const rootEndpointLink = Array(graph.n + 1).fill(0);
+  const rootState = {
+    closedChains: 0,
+    usedVertices: 0,
+    chosenEdgeTotal: 0,
+    chosenEdges: [],
+    allowedEdgeKeys: graph.allowedEdgeKeys,
+    allowedEdges: graph.allowedEdges
+  };
+  const initialForced = propagateConfiguredForcedEdges(graph.edge, graph.n, rootEndpointLink, rootState, searchOptions);
+  const baseAssignment = convertSimplifiedAssignment(prepared.simplified.assignment, variableCount);
+  const rootInferred = satAssignmentFromVcState(rootState, meta);
+  let rootConflict = rootInferred.conflict || !mergeSatAssignment(baseAssignment, rootInferred.assignment, variableCount);
+
+  const queue = [{
+    endpointLink: rootEndpointLink,
+    state: rootState,
+    assignment: baseAssignment,
+    decisions: [],
+    penalty: 0,
+    lastAdaptiveBeta: beta
+  }];
+  const seenQueuedAssignments = new Set([satAssignmentSignature(baseAssignment, variableCount)]);
+  const satisfyingAssignments = [];
+  const satisfyingSeen = new Set();
+  let explored = 0;
+  let queued = 1;
+  let assignmentsChecked = 0;
+  let bestFailureReason = rootConflict ? "initial SAT/VC witness propagation conflict" : "";
+
+  while (!rootConflict && queue.length > 0 && explored < requestedTries) {
+    queue.sort((a, b) => a.penalty - b.penalty);
+    const branch = queue.shift();
+    explored += 1;
+
+    while (!branch.state.invalid) {
+      if (!partialFormulaCanStillBeSatisfied(originalClauses, branch.assignment)) {
+        bestFailureReason = "partial assignment already falsifies a clause";
+        break;
+      }
+
+      const remainingDecisions = currentSatDecisionCandidateEdges(satDecisionCandidates, branch.assignment, graph, branch.endpointLink);
+      if (remainingDecisions.length === 0) {
+        assignmentsChecked += 1;
+        if (formulaIsSatisfied(originalClauses, branch.assignment)) {
+          const signature = satAssignmentSignature(branch.assignment, originalVariableCount);
+          if (!satisfyingSeen.has(signature)) {
+            satisfyingSeen.add(signature);
+            satisfyingAssignments.push({
+              assignment: branch.assignment.slice(0, originalVariableCount + 1),
+              decisions: branch.decisions.slice(),
+              chosenEdges: branch.state.chosenEdges ? branch.state.chosenEdges.slice() : [],
+              totalForcedEdges: branch.state.chosenEdges ? branch.state.chosenEdges.length : 0
+            });
+          }
+        } else {
+          bestFailureReason = "completed SAT witness choices did not satisfy the formula";
+        }
+        break;
+      }
+
+      const betaInfo = resolveStepBeta(graph.n, graph.edge, null, branch.endpointLink, branch.state, searchOptions, branch.lastAdaptiveBeta);
+      branch.lastAdaptiveBeta = betaInfo.lastAdaptiveBeta;
+      const scoringOptions = {
+        ...searchOptions,
+        currentStats: betaInfo.currentStats,
+        candidateEdgeList: remainingDecisions
+      };
+      const currentDecisionByKey = new Map(remainingDecisions.map(candidate => [candidate.key, candidate]));
+      const ranked = rankScoringEdges(graph.n, graph.edge, null, branch.endpointLink, branch.state, betaInfo.beta, null, scoringOptions)
+        .map(candidate => ({ ...candidate, satDecision: currentDecisionByKey.get(edgeKey(candidate.from, candidate.to)) }))
+        .filter(candidate => candidate.satDecision);
+      if (ranked.length === 0) {
+        bestFailureReason = "no remaining SAT witness decision edge could be scored";
+        break;
+      }
+
+      const best = ranked[0];
+      const seenConsequences = new Set();
+      const bestSignature = (() => {
+        const preview = cloneSatDecisionBranch(branch);
+        if (!applySatDecisionCandidate(preview, best.satDecision, graph, searchOptions)) return "";
+        return satAssignmentSignature(preview.assignment, variableCount);
+      })();
+      if (bestSignature) seenConsequences.add(bestSignature);
+
+      const hasBacktrackRoom = explored + queue.length < requestedTries;
+      if (hasBacktrackRoom) {
+        const alternativesToKeep = shouldStopAtFirstHcTour() ? 2 : ranked.length;
+        for (let optionIndex = 1; optionIndex < ranked.length && explored + queue.length < requestedTries; optionIndex++) {
+          const candidate = ranked[optionIndex];
+          const rankedInfo = { candidate, satDecision: candidate.satDecision, best, optionIndex };
+          const alternative = prepareSatDecisionAlternative(branch, rankedInfo, graph, searchOptions, originalClauses);
+          if (!alternative) continue;
+          const signature = satAssignmentSignature(alternative.assignment, variableCount);
+          if (seenConsequences.has(signature) || seenQueuedAssignments.has(signature)) continue;
+          seenConsequences.add(signature);
+          seenQueuedAssignments.add(signature);
+          queue.push(alternative);
+          queued += 1;
+          if (seenConsequences.size > alternativesToKeep) break;
+        }
+      }
+
+      if (!applySatDecisionCandidate(branch, best.satDecision, graph, searchOptions)) {
+        bestFailureReason = branch.state.invalidReason || "SAT witness choice became invalid";
+        break;
+      }
+    }
+
+    if (satisfyingAssignments.length > 0 && shouldStopAtFirstHcTour()) break;
+  }
+
+  return {
+    hamiltonianFound: satisfyingAssignments.length > 0,
+    satisfyingAssignments,
+    explored,
+    queued,
+    assignmentsChecked,
+    requestedTries,
+    satDecisionChoices: satDecisionCandidates.length,
+    initialForcedEdges: initialForced.forcedEdgeCount,
+    totalTourCost: satisfyingAssignments.length > 0 ? -graph.n : NaN,
+    partialTourCost: rootState.chosenEdgeTotal,
+    bestFailureReason
+  };
 }
 
 function collectVertexCovers(n, k, edges, limit) {
@@ -3903,8 +4265,8 @@ function prepareSatViaVertexCoverForHc(sat, padding, materializeLimit = getHcSol
     graph.vertexCoverPropagation.satVariableCount = vertexCover.variableCount;
     graph.vertexCoverPropagation.satDecisionEdgeKeys = new Set();
     for (const pattern of graph.vertexCoverPropagation.rejectionPatterns) {
-      if (!vertexCoverPatternTouchesSatLiteral(pattern, graph.vertexCoverPropagation)) continue;
-      pattern.crossKeys.forEach(key => graph.vertexCoverPropagation.satDecisionEdgeKeys.add(key));
+      if (!vertexCoverPatternIsSatVariablePair(pattern, graph.vertexCoverPropagation)) continue;
+      graph.vertexCoverPropagation.satDecisionEdgeKeys.add(pattern.crossKeys[0]);
     }
   }
   return { simplified, vertexCover, graph, stats, skipped: false };
@@ -4677,22 +5039,56 @@ function simplify3SatForHc(variableCount, clauses) {
 function run3SatCompressed(text) {
   const { variableCount, clauseCount, padding, clauses } = parse3Sat(text);
   const prepared = prepareSatViaVertexCoverForHc({ variableCount, clauses }, padding);
-  if (prepared.graph && prepared.graph.vertexCoverPropagation) {
-    prepared.graph.vertexCoverPropagation.witnessKind = "sat";
-    prepared.graph.vertexCoverPropagation.witnessTargetSize = variableCount;
-  }
   const lines = [];
-  appendSatViaVertexCoverHcReduction(lines, prepared, "3-SAT via classic Vertex Cover HC reduction", "Original 3-SAT", "SATISFIABLE", "UNSATISFIABLE", () => {
+  if (prepared.simplified.contradiction) {
+    append(lines, "Final answer:");
+    append(lines, "Original 3-SAT answer after exact unit simplification: UNSATISFIABLE");
+    append(lines, `reason = ${prepared.simplified.contradictionReason}`);
+    return lines.join("\n");
+  }
+
+  if (prepared.skipped) {
+    append(lines, "Final answer:");
+    append(lines, "Original 3-SAT answer inferred from HC witness choices: NOT COMPUTED");
+    append(lines);
+    append(lines, "Run summary:");
+    append(lines, `estimated HC nodes after Vertex Cover gadget = ${prepared.stats.hcNodes}`);
+    append(lines, `HC solver not run because ${prepared.skipReason}.`);
+    return lines.join("\n");
+  }
+
+  const search = runSatWitnessHcDecisionSearch(prepared, variableCount, clauses);
+  append(lines, "Final answer:");
+  append(lines, search.hamiltonianFound
+    ? "Original 3-SAT answer inferred from HC witness choices: SATISFIABLE"
+    : "Original 3-SAT answer inferred from HC witness choices: NOT FOUND BY HC WITNESS SEARCH");
+  append(lines, `HC nodes = ${prepared.graph.n}`);
+  append(lines, `allowed HC edges scored = ${prepared.graph.allowedEdgeKeys.size}`);
+  append(lines, `SAT witness choices scored = ${search.satDecisionChoices}`);
+  append(lines, `SAT witness branches explored = ${search.explored}`);
+  append(lines, `SAT assignments checked = ${search.assignmentsChecked}`);
+  append(lines, `HC backtrack tries = ${search.requestedTries}`);
+  append(lines, `HC tour search mode = ${shouldStopAtFirstHcTour() ? "stop at first HC tour" : "search all tries"}`);
+  append(lines, `VC/degree-2 forced edges before SAT choices = ${search.initialForcedEdges}`);
+  if (search.hamiltonianFound) {
+    append(lines, "HC decision: HAMILTONIAN CYCLE WITNESS ACCEPTED");
+    append(lines, `HC target cost = ${formatNumber(-prepared.graph.n)}`);
+    append(lines, `HC witness decision cost = ${formatNumber(search.totalTourCost)}`);
+  } else {
+    append(lines, "HC decision: HAMILTONIAN CYCLE WITNESS NOT FOUND");
+    if (search.bestFailureReason) append(lines, `best failed reason = ${search.bestFailureReason}`);
+  }
+
+  if (search.satisfyingAssignments.length > 0) {
     const limit = witnessDisplayLimit();
-    const assignments = collectSatisfyingAssignments(variableCount, clauses, limit);
-    if (assignments.length === 0) {
-      return ["satisfying assignment witness unavailable even though HC returned YES"];
-    }
-    return [
-      `assignments shown = ${assignments.length} / limit ${limit}`,
-      ...assignments.map((assignment, index) => `${index + 1}. assignment = ${formatSatAssignmentWitness(assignment, variableCount)}`)
-    ];
-  });
+    const shown = search.satisfyingAssignments.slice(0, limit);
+    append(lines);
+    append(lines, "Witnesses inferred from HC:");
+    append(lines, `assignments shown = ${shown.length} / found ${search.satisfyingAssignments.length}`);
+    shown.forEach((item, index) => {
+      append(lines, `${index + 1}. assignment = ${formatSatAssignmentWitness(item.assignment, variableCount)}`);
+    });
+  }
   return lines.join("\n");
 }
 
