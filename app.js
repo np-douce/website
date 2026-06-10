@@ -3057,7 +3057,7 @@ function satDecisionLabel(candidate) {
   return `x${candidate.variable}=${candidate.value === 1 ? "true" : "false"}`;
 }
 
-function applySatDecisionCandidate(branch, candidate, graph, searchOptions) {
+function applySatDecisionCandidate(branch, candidate, graph, searchOptions, applyFollowUps = true) {
   if (!applyChosenEdge(candidate.from, candidate.to, graph.edge, branch.endpointLink, branch.state)) {
     branch.state.invalid = true;
     branch.state.invalidReason = `SAT witness choice ${satDecisionLabel(candidate)} could not be applied.`;
@@ -3078,6 +3078,27 @@ function applySatDecisionCandidate(branch, candidate, graph, searchOptions) {
     edge: { from: candidate.from, to: candidate.to },
     forcedEdges: forced.forcedEdgeCount
   });
+  if (applyFollowUps && searchOptions.satForcedDecisionsAfterChoice) {
+    const forcedDecisions = searchOptions.satForcedDecisionsAfterChoice(candidate, branch.assignment, branch) || [];
+    for (const forcedDecision of forcedDecisions) {
+      const variable = forcedDecision.variable;
+      const value = forcedDecision.value;
+      if (branch.assignment[variable] === value) continue;
+      if (branch.assignment[variable] !== -1) {
+        branch.state.invalid = true;
+        branch.state.invalidReason = `SAT witness consequence conflicts at x${variable}.`;
+        return false;
+      }
+      const available = currentSatDecisionCandidateEdges(searchOptions.satAllDecisionCandidates || [], branch.assignment, graph, branch.endpointLink);
+      const forcedCandidate = available.find(item => item.variable === variable && item.value === value);
+      if (!forcedCandidate) {
+        branch.state.invalid = true;
+        branch.state.invalidReason = `SAT witness consequence could not force x${variable}=${value === 1 ? "true" : "false"}.`;
+        return false;
+      }
+      if (!applySatDecisionCandidate(branch, forcedCandidate, graph, searchOptions, false)) return false;
+    }
+  }
   return true;
 }
 
@@ -3098,23 +3119,32 @@ function prepareSatDecisionAlternative(branch, rankedInfo, graph, searchOptions,
   alternative.penalty = branch.penalty + scoreRegret(rankedInfo.best, rankedInfo.candidate) + (rankedInfo.optionIndex * 1e-9);
   if (!applySatDecisionCandidate(alternative, candidate, graph, searchOptions)) return null;
   if (!partialFormulaCanStillBeSatisfied(clauses, alternative.assignment)) return null;
+  if (searchOptions.satPartialValidator && !searchOptions.satPartialValidator(alternative.assignment, alternative)) return null;
   return alternative;
 }
 
-function runSatWitnessHcDecisionSearch(prepared, originalVariableCount, originalClauses) {
+function runSatWitnessHcDecisionSearch(prepared, formulaVariableCount, formulaClauses, options = {}) {
   const graph = prepared.graph;
   const meta = graph.vertexCoverPropagation;
-  const variableCount = Math.max(originalVariableCount, prepared.simplified.variableCount || originalVariableCount);
+  const variableCount = Math.max(formulaVariableCount, prepared.simplified.variableCount || formulaVariableCount);
+  const requestedDecisionVariableCount = options.decisionVariableCount === undefined
+    ? formulaVariableCount
+    : options.decisionVariableCount;
+  const decisionVariableCount = Math.max(0, Math.min(variableCount, Math.floor(Number(requestedDecisionVariableCount))));
+  const assignmentValidator = options.assignmentValidator || ((assignment) => formulaIsSatisfied(formulaClauses, assignment));
+  const partialAssignmentValidator = options.partialAssignmentValidator || null;
   meta.witnessKind = "sat";
   meta.witnessTargetSize = variableCount;
   meta.satVariableCount = variableCount;
 
   const graphEdgeList = graph.allowedEdges || buildNonzeroEdgeList(graph.edge, graph.n);
   attachEdgeListAdjacency(graphEdgeList, graph.n);
-  const satDecisionCandidates = buildSatDecisionCandidates(graph);
+  const satDecisionCandidates = buildSatDecisionCandidates(graph)
+    .filter(candidate => candidate.variable <= decisionVariableCount);
   const baseMoments = computeTheoryMomentsFromEdgeList(graphEdgeList, graph.n);
   const beta = 1.0 / Math.sqrt(Math.max(Number.MIN_VALUE, baseMoments.tourVariance));
-  const requestedTries = Math.max(1, Math.floor(getHcBacktrackTries()));
+  const requestedBacktracks = Math.max(0, Math.floor(getHcBacktrackTries()));
+  const branchLimit = Math.max(1, requestedBacktracks);
   const searchOptions = {
     forceDegreeTwo: true,
     allowedEdgeKeys: graph.allowedEdgeKeys || null,
@@ -3125,7 +3155,11 @@ function runSatWitnessHcDecisionSearch(prepared, originalVariableCount, original
     adaptiveBeta: true,
     betaMultiplier: 1,
     scoreMethod: "importance",
-    satVariableCount: variableCount
+    satVariableCount: variableCount,
+    satPartialValidator: partialAssignmentValidator,
+    satAllDecisionCandidates: satDecisionCandidates,
+    satDecisionCandidateFilter: options.decisionCandidateFilter || null,
+    satForcedDecisionsAfterChoice: options.forcedDecisionsAfterChoice || null
   };
 
   const rootEndpointLink = Array(graph.n + 1).fill(0);
@@ -3150,7 +3184,7 @@ function runSatWitnessHcDecisionSearch(prepared, originalVariableCount, original
     penalty: 0,
     lastAdaptiveBeta: beta
   }];
-  const seenQueuedAssignments = new Set([satAssignmentSignature(baseAssignment, variableCount)]);
+  const seenQueuedAssignments = new Set([satAssignmentSignature(baseAssignment, decisionVariableCount)]);
   const satisfyingAssignments = [];
   const satisfyingSeen = new Set();
   let explored = 0;
@@ -3158,33 +3192,41 @@ function runSatWitnessHcDecisionSearch(prepared, originalVariableCount, original
   let assignmentsChecked = 0;
   let bestFailureReason = rootConflict ? "initial SAT/VC witness propagation conflict" : "";
 
-  while (!rootConflict && queue.length > 0 && explored < requestedTries) {
+  while (!rootConflict && queue.length > 0 && explored < branchLimit) {
     queue.sort((a, b) => a.penalty - b.penalty);
     const branch = queue.shift();
     explored += 1;
 
     while (!branch.state.invalid) {
-      if (!partialFormulaCanStillBeSatisfied(originalClauses, branch.assignment)) {
+      if (!partialFormulaCanStillBeSatisfied(formulaClauses, branch.assignment)) {
         bestFailureReason = "partial assignment already falsifies a clause";
         break;
       }
+      if (partialAssignmentValidator && !partialAssignmentValidator(branch.assignment, branch)) {
+        bestFailureReason = "partial original decision witness is already impossible";
+        break;
+      }
 
-      const remainingDecisions = currentSatDecisionCandidateEdges(satDecisionCandidates, branch.assignment, graph, branch.endpointLink);
+      let remainingDecisions = currentSatDecisionCandidateEdges(satDecisionCandidates, branch.assignment, graph, branch.endpointLink);
+      if (searchOptions.satDecisionCandidateFilter) {
+        remainingDecisions = remainingDecisions.filter(candidate => searchOptions.satDecisionCandidateFilter(candidate, branch.assignment, branch));
+      }
       if (remainingDecisions.length === 0) {
         assignmentsChecked += 1;
-        if (formulaIsSatisfied(originalClauses, branch.assignment)) {
-          const signature = satAssignmentSignature(branch.assignment, originalVariableCount);
+        if (assignmentValidator(branch.assignment, branch)) {
+          const signature = satAssignmentSignature(branch.assignment, decisionVariableCount);
           if (!satisfyingSeen.has(signature)) {
             satisfyingSeen.add(signature);
             satisfyingAssignments.push({
-              assignment: branch.assignment.slice(0, originalVariableCount + 1),
+              assignment: branch.assignment.slice(),
+              decisionAssignment: branch.assignment.slice(0, decisionVariableCount + 1),
               decisions: branch.decisions.slice(),
               chosenEdges: branch.state.chosenEdges ? branch.state.chosenEdges.slice() : [],
               totalForcedEdges: branch.state.chosenEdges ? branch.state.chosenEdges.length : 0
             });
           }
         } else {
-          bestFailureReason = "completed SAT witness choices did not satisfy the formula";
+          bestFailureReason = "completed witness choices did not satisfy the original decision check";
         }
         break;
       }
@@ -3214,15 +3256,15 @@ function runSatWitnessHcDecisionSearch(prepared, originalVariableCount, original
       })();
       if (bestSignature) seenConsequences.add(bestSignature);
 
-      const hasBacktrackRoom = explored + queue.length < requestedTries;
+      const hasBacktrackRoom = explored + queue.length < branchLimit;
       if (hasBacktrackRoom) {
-        const alternativesToKeep = shouldStopAtFirstHcTour() ? 2 : ranked.length;
-        for (let optionIndex = 1; optionIndex < ranked.length && explored + queue.length < requestedTries; optionIndex++) {
+        const alternativesToKeep = ranked.length;
+        for (let optionIndex = 1; optionIndex < ranked.length && explored + queue.length < branchLimit; optionIndex++) {
           const candidate = ranked[optionIndex];
           const rankedInfo = { candidate, satDecision: candidate.satDecision, best, optionIndex };
-          const alternative = prepareSatDecisionAlternative(branch, rankedInfo, graph, searchOptions, originalClauses);
+          const alternative = prepareSatDecisionAlternative(branch, rankedInfo, graph, searchOptions, formulaClauses);
           if (!alternative) continue;
-          const signature = satAssignmentSignature(alternative.assignment, variableCount);
+          const signature = satAssignmentSignature(alternative.assignment, decisionVariableCount);
           if (seenConsequences.has(signature) || seenQueuedAssignments.has(signature)) continue;
           seenConsequences.add(signature);
           seenQueuedAssignments.add(signature);
@@ -3247,11 +3289,414 @@ function runSatWitnessHcDecisionSearch(prepared, originalVariableCount, original
     explored,
     queued,
     assignmentsChecked,
-    requestedTries,
+    requestedBacktracks,
+    branchLimit,
+    decisionVariableCount,
     satDecisionChoices: satDecisionCandidates.length,
     initialForcedEdges: initialForced.forcedEdgeCount,
     totalTourCost: satisfyingAssignments.length > 0 ? -graph.n : NaN,
     partialTourCost: rootState.chosenEdgeTotal,
+    bestFailureReason
+  };
+}
+
+function sortedVertexCoverSet(state, vertexCount) {
+  const selected = state.vcSelectedVertices || new Set();
+  const result = [];
+  for (let vertex = 1; vertex <= vertexCount; vertex++) {
+    if (selected.has(vertex)) result.push(vertex);
+  }
+  return result;
+}
+
+function vertexCoverDecisionSignature(state, vertexCount) {
+  const selected = state.vcSelectedVertices || new Set();
+  const rejected = state.vcRejectedVertices || new Set();
+  const parts = [];
+  for (let vertex = 1; vertex <= vertexCount; vertex++) {
+    parts.push(selected.has(vertex) ? "C" : (rejected.has(vertex) ? "N" : "?"));
+  }
+  return parts.join("");
+}
+
+function vertexCoverWitnessValid(state, vertexCount, coverLimit, edges) {
+  const selected = state.vcSelectedVertices || new Set();
+  if (selected.size > coverLimit) return false;
+  for (const [u, v] of edges) {
+    if (!selected.has(u) && !selected.has(v)) return false;
+  }
+  return true;
+}
+
+function vertexCoverPartialWitnessValid(state, coverLimit, edges) {
+  const selected = state.vcSelectedVertices || new Set();
+  const rejected = state.vcRejectedVertices || new Set();
+  if (selected.size > coverLimit) return false;
+  for (const [u, v] of edges) {
+    if (rejected.has(u) && rejected.has(v)) return false;
+  }
+  return true;
+}
+
+function buildVertexCoverDecisionCandidates(graph, vertexCount) {
+  const meta = graph.vertexCoverPropagation;
+  if (!meta) return [];
+  const edgeByKey = new Map((graph.allowedEdges || []).map(item => [item.key, item]));
+  const pathByVertex = new Map((graph.vertexPaths || []).map(path => [path.vertex, path]));
+  const candidates = [];
+
+  for (let vertex = 1; vertex <= vertexCount; vertex++) {
+    const coverChoices = [];
+    const path = pathByVertex.get(vertex);
+    if (path) {
+      for (const selector of graph.selectors || []) {
+        [
+          edgeKey(selector.entry, path.start),
+          edgeKey(selector.entry, path.end),
+          edgeKey(selector.exit, path.start),
+          edgeKey(selector.exit, path.end)
+        ].forEach(key => {
+          const edgeInfo = edgeByKey.get(key);
+          if (edgeInfo) coverChoices.push(edgeInfo);
+        });
+      }
+    }
+    for (const connector of meta.connectorEdgesByVertex[vertex] || []) {
+      const edgeInfo = edgeByKey.get(connector.key);
+      if (edgeInfo) coverChoices.push(edgeInfo);
+    }
+    if (coverChoices.length > 0) {
+      candidates.push({
+        kind: "cover",
+        vertex,
+        edgeChoices: coverChoices
+      });
+    }
+
+    const rejectChoices = [];
+    for (const pattern of meta.rejectionPatterns || []) {
+      if (pattern.rejectedVertex !== vertex) continue;
+      for (const key of pattern.crossKeys) {
+        const edgeInfo = edgeByKey.get(key);
+        if (edgeInfo) rejectChoices.push(edgeInfo);
+      }
+    }
+    if (rejectChoices.length > 0) {
+      candidates.push({
+        kind: "reject",
+        vertex,
+        edgeChoices: rejectChoices
+      });
+    }
+  }
+
+  return candidates;
+}
+
+function currentVertexCoverDecisionCandidateEdges(candidates, state, graph, endpointLink, coverLimit) {
+  const selected = state.vcSelectedVertices || new Set();
+  const rejected = state.vcRejectedVertices || new Set();
+  const result = [];
+  for (const candidate of candidates) {
+    if (selected.has(candidate.vertex) || rejected.has(candidate.vertex)) continue;
+    if (candidate.kind === "cover" && selected.size >= coverLimit) continue;
+    const edgeInfo = candidate.edgeChoices.find(choice => satDecisionEdgeAvailable(choice, graph.edge, endpointLink));
+    if (!edgeInfo) continue;
+    result.push({
+      ...candidate,
+      from: edgeInfo.from,
+      to: edgeInfo.to,
+      weight: edgeInfo.weight,
+      weightSquared: edgeInfo.weightSquared,
+      key: edgeInfo.key
+    });
+  }
+  return result;
+}
+
+function vertexCoverDecisionCoverageGain(candidate, state, edges, meta, coverLimit) {
+  const selected = state.vcSelectedVertices || new Set();
+  const rejected = state.vcRejectedVertices || new Set();
+  const nextSelected = new Set(selected);
+  if (candidate.kind === "cover") {
+    nextSelected.add(candidate.vertex);
+  } else {
+    for (const neighbor of meta.neighborsByVertex[candidate.vertex] || []) {
+      if (!rejected.has(neighbor)) nextSelected.add(neighbor);
+    }
+  }
+  if (nextSelected.size > coverLimit) return -1000000;
+  let gain = 0;
+  for (const [u, v] of edges) {
+    const wasCovered = selected.has(u) || selected.has(v);
+    const wouldCover = nextSelected.has(u) || nextSelected.has(v);
+    if (!wasCovered && wouldCover) gain += 1;
+  }
+  return gain;
+}
+
+function vertexCoverDecisionAddedSelectedCount(candidate, state, meta) {
+  const selected = state.vcSelectedVertices || new Set();
+  const rejected = state.vcRejectedVertices || new Set();
+  const nextSelected = new Set(selected);
+  if (candidate.kind === "cover") {
+    nextSelected.add(candidate.vertex);
+  } else {
+    for (const neighbor of meta.neighborsByVertex[candidate.vertex] || []) {
+      if (!rejected.has(neighbor)) nextSelected.add(neighbor);
+    }
+  }
+  return Math.max(0, nextSelected.size - selected.size);
+}
+
+function vertexCoverDecisionLabel(candidate) {
+  return candidate.kind === "cover"
+    ? `cover(${candidate.vertex})`
+    : `not-cover(${candidate.vertex})`;
+}
+
+function forceVertexCoverCapacityConsequences(vertexCount, meta, edge, endpointLink, state) {
+  const result = { forcedDecisions: 0, forcedEdgeCount: 0 };
+  ensureVertexCoverPropagationState(state);
+  if ((state.vcSelectedVertices || new Set()).size < meta.coverLimit) return result;
+  const chosenKeys = chosenEdgeKeySet(state);
+  for (let vertex = 1; vertex <= vertexCount; vertex++) {
+    if (state.vcSelectedVertices.has(vertex) || state.vcRejectedVertices.has(vertex)) continue;
+    const forced = forceVertexCoverRejected(vertex, meta, edge, endpointLink, state, chosenKeys);
+    result.forcedDecisions += forced.rejectedVertexCount;
+    result.forcedEdgeCount += forced.forcedEdgeCount;
+    if (state.invalid) return result;
+  }
+  return result;
+}
+
+function applyVertexCoverDecisionCandidate(branch, candidate, graph, searchOptions) {
+  if (!applyChosenEdge(candidate.from, candidate.to, graph.edge, branch.endpointLink, branch.state)) {
+    branch.state.invalid = true;
+    branch.state.invalidReason = `Vertex Cover witness choice ${vertexCoverDecisionLabel(candidate)} could not be applied.`;
+    return false;
+  }
+
+  const meta = searchOptions.vertexCoverPropagation;
+  const chosenKeys = chosenEdgeKeySet(branch.state);
+  let directForced = null;
+  if (candidate.kind === "cover") {
+    directForced = forceVertexCoverSelected(candidate.vertex, meta, graph.edge, branch.endpointLink, branch.state, chosenKeys);
+  } else {
+    directForced = forceVertexCoverRejected(candidate.vertex, meta, graph.edge, branch.endpointLink, branch.state, chosenKeys);
+  }
+  if (branch.state.invalid) return false;
+
+  const propagated = propagateConfiguredForcedEdges(graph.edge, graph.n, branch.endpointLink, branch.state, searchOptions);
+  if (branch.state.invalid) return false;
+  const capacity = forceVertexCoverCapacityConsequences(searchOptions.vertexCount, meta, graph.edge, branch.endpointLink, branch.state);
+  if (branch.state.invalid) return false;
+  if (capacity.forcedDecisions > 0 || capacity.forcedEdgeCount > 0) {
+    const afterCapacity = propagateConfiguredForcedEdges(graph.edge, graph.n, branch.endpointLink, branch.state, searchOptions);
+    if (branch.state.invalid) return false;
+    propagated.forcedEdgeCount += afterCapacity.forcedEdgeCount;
+  }
+
+  branch.decisions.push({
+    vertex: candidate.vertex,
+    kind: candidate.kind,
+    edge: { from: candidate.from, to: candidate.to },
+    forcedEdges: (directForced ? directForced.forcedEdgeCount : 0) + propagated.forcedEdgeCount + capacity.forcedEdgeCount
+  });
+  return true;
+}
+
+function cloneVertexCoverDecisionBranch(branch) {
+  return {
+    endpointLink: branch.endpointLink.slice(),
+    state: cloneSolverState(branch.state),
+    decisions: branch.decisions.slice(),
+    penalty: branch.penalty,
+    lastAdaptiveBeta: branch.lastAdaptiveBeta
+  };
+}
+
+function prepareVertexCoverDecisionAlternative(branch, rankedInfo, graph, searchOptions, edges) {
+  const alternative = cloneVertexCoverDecisionBranch(branch);
+  alternative.penalty = branch.penalty + scoreRegret(rankedInfo.best, rankedInfo.candidate) + (rankedInfo.optionIndex * 1e-9);
+  if (!applyVertexCoverDecisionCandidate(alternative, rankedInfo.vcDecision, graph, searchOptions)) return null;
+  if (!vertexCoverPartialWitnessValid(alternative.state, searchOptions.vertexCoverPropagation.coverLimit, edges)) return null;
+  return alternative;
+}
+
+function runVertexCoverWitnessHcDecisionSearch(graph, vertexCount, coverLimit, edges) {
+  if (!graph.vertexCoverPropagation) {
+    const selected = [];
+    return {
+      hamiltonianFound: edges.length === 0,
+      covers: edges.length === 0 ? [{ cover: selected, decisions: [], chosenEdges: [] }] : [],
+      explored: 0,
+      queued: 0,
+      assignmentsChecked: edges.length === 0 ? 1 : 0,
+      requestedBacktracks: Math.max(0, Math.floor(getHcBacktrackTries())),
+      branchLimit: Math.max(1, Math.max(0, Math.floor(getHcBacktrackTries()))),
+      decisionVertices: vertexCount,
+      vcDecisionChoices: 0,
+      initialForcedEdges: 0,
+      totalTourCost: edges.length === 0 ? -graph.n : NaN,
+      bestFailureReason: edges.length === 0 ? "" : "no Vertex Cover HC propagation metadata"
+    };
+  }
+
+  const meta = graph.vertexCoverPropagation;
+  meta.coverLimit = coverLimit;
+  const graphEdgeList = graph.allowedEdges || buildNonzeroEdgeList(graph.edge, graph.n);
+  attachEdgeListAdjacency(graphEdgeList, graph.n);
+  const vcDecisionCandidates = buildVertexCoverDecisionCandidates(graph, vertexCount);
+  const baseMoments = computeTheoryMomentsFromEdgeList(graphEdgeList, graph.n);
+  const beta = 1.0 / Math.sqrt(Math.max(Number.MIN_VALUE, baseMoments.tourVariance));
+  const requestedBacktracks = Math.max(0, Math.floor(getHcBacktrackTries()));
+  const branchLimit = Math.max(1, requestedBacktracks);
+  const searchOptions = {
+    forceDegreeTwo: true,
+    allowedEdgeKeys: graph.allowedEdgeKeys || null,
+    allowedEdges: graph.allowedEdges || null,
+    momentEdgeList: graphEdgeList,
+    vertexCoverPropagation: meta,
+    effectiveBeta: beta,
+    adaptiveBeta: true,
+    betaMultiplier: 1,
+    scoreMethod: "importance",
+    vertexCount
+  };
+
+  const rootEndpointLink = Array(graph.n + 1).fill(0);
+  const rootState = {
+    closedChains: 0,
+    usedVertices: 0,
+    chosenEdgeTotal: 0,
+    chosenEdges: [],
+    allowedEdgeKeys: graph.allowedEdgeKeys,
+    allowedEdges: graph.allowedEdges
+  };
+  const initialForced = propagateConfiguredForcedEdges(graph.edge, graph.n, rootEndpointLink, rootState, searchOptions);
+  const capacity = forceVertexCoverCapacityConsequences(vertexCount, meta, graph.edge, rootEndpointLink, rootState);
+  if (!rootState.invalid && (capacity.forcedDecisions > 0 || capacity.forcedEdgeCount > 0)) {
+    propagateConfiguredForcedEdges(graph.edge, graph.n, rootEndpointLink, rootState, searchOptions);
+  }
+
+  const rootConflict = rootState.invalid;
+  const queue = [{
+    endpointLink: rootEndpointLink,
+    state: rootState,
+    decisions: [],
+    penalty: 0,
+    lastAdaptiveBeta: beta
+  }];
+  const seenQueued = new Set([vertexCoverDecisionSignature(rootState, vertexCount)]);
+  const covers = [];
+  const seenCovers = new Set();
+  let explored = 0;
+  let queued = 1;
+  let assignmentsChecked = 0;
+  let bestFailureReason = rootConflict ? (rootState.invalidReason || "initial Vertex Cover propagation conflict") : "";
+
+  while (!rootConflict && queue.length > 0 && explored < branchLimit) {
+    queue.sort((a, b) => a.penalty - b.penalty);
+    const branch = queue.shift();
+    explored += 1;
+
+    while (!branch.state.invalid) {
+      if (!vertexCoverPartialWitnessValid(branch.state, coverLimit, edges)) {
+        bestFailureReason = "partial Vertex Cover witness is already impossible";
+        break;
+      }
+
+      const remainingDecisions = currentVertexCoverDecisionCandidateEdges(vcDecisionCandidates, branch.state, graph, branch.endpointLink, coverLimit);
+      if (remainingDecisions.length === 0) {
+        assignmentsChecked += 1;
+        if (vertexCoverWitnessValid(branch.state, vertexCount, coverLimit, edges)) {
+          const cover = sortedVertexCoverSet(branch.state, vertexCount);
+          const signature = cover.join(":");
+          if (!seenCovers.has(signature)) {
+            seenCovers.add(signature);
+            covers.push({
+              cover,
+              decisions: branch.decisions.slice(),
+              chosenEdges: branch.state.chosenEdges ? branch.state.chosenEdges.slice() : []
+            });
+          }
+        } else {
+          bestFailureReason = "completed Vertex Cover witness choices did not cover every edge";
+        }
+        break;
+      }
+
+      const betaInfo = resolveStepBeta(graph.n, graph.edge, null, branch.endpointLink, branch.state, searchOptions, branch.lastAdaptiveBeta);
+      branch.lastAdaptiveBeta = betaInfo.lastAdaptiveBeta;
+      const scoringOptions = {
+        ...searchOptions,
+        currentStats: betaInfo.currentStats,
+        candidateEdgeList: remainingDecisions
+      };
+      const currentDecisionByKey = new Map(remainingDecisions.map(candidate => [candidate.key, candidate]));
+      const ranked = rankScoringEdges(graph.n, graph.edge, null, branch.endpointLink, branch.state, betaInfo.beta, null, scoringOptions)
+        .map(candidate => ({ ...candidate, vcDecision: currentDecisionByKey.get(edgeKey(candidate.from, candidate.to)) }))
+        .filter(candidate => candidate.vcDecision);
+      for (const candidate of ranked) {
+        candidate.vcCoverageGain = vertexCoverDecisionCoverageGain(candidate.vcDecision, branch.state, edges, meta, coverLimit);
+        candidate.vcAddedSelected = vertexCoverDecisionAddedSelectedCount(candidate.vcDecision, branch.state, meta);
+        candidate.vcCoverageEfficiency = candidate.vcCoverageGain / Math.max(1, candidate.vcAddedSelected);
+      }
+      ranked.sort((a, b) =>
+        b.vcCoverageEfficiency - a.vcCoverageEfficiency ||
+        b.vcCoverageGain - a.vcCoverageGain ||
+        b.probability - a.probability);
+      if (ranked.length === 0) {
+        bestFailureReason = "no remaining Vertex Cover witness decision edge could be scored";
+        break;
+      }
+
+      const best = ranked[0];
+      const seenConsequences = new Set();
+      const preview = cloneVertexCoverDecisionBranch(branch);
+      if (applyVertexCoverDecisionCandidate(preview, best.vcDecision, graph, searchOptions)) {
+        seenConsequences.add(vertexCoverDecisionSignature(preview.state, vertexCount));
+      }
+
+      const hasBacktrackRoom = explored + queue.length < branchLimit;
+      if (hasBacktrackRoom) {
+        const alternativesToKeep = shouldStopAtFirstHcTour() ? 2 : ranked.length;
+        for (let optionIndex = 1; optionIndex < ranked.length && explored + queue.length < branchLimit; optionIndex++) {
+          const candidate = ranked[optionIndex];
+          const alternative = prepareVertexCoverDecisionAlternative(branch, { candidate, vcDecision: candidate.vcDecision, best, optionIndex }, graph, searchOptions, edges);
+          if (!alternative) continue;
+          const signature = vertexCoverDecisionSignature(alternative.state, vertexCount);
+          if (seenConsequences.has(signature) || seenQueued.has(signature)) continue;
+          seenConsequences.add(signature);
+          seenQueued.add(signature);
+          queue.push(alternative);
+          queued += 1;
+          if (seenConsequences.size > alternativesToKeep) break;
+        }
+      }
+
+      if (!applyVertexCoverDecisionCandidate(branch, best.vcDecision, graph, searchOptions)) {
+        bestFailureReason = branch.state.invalidReason || "Vertex Cover witness choice became invalid";
+        break;
+      }
+    }
+
+    if (covers.length > 0 && shouldStopAtFirstHcTour()) break;
+  }
+
+  return {
+    hamiltonianFound: covers.length > 0,
+    covers,
+    explored,
+    queued,
+    assignmentsChecked,
+    requestedBacktracks,
+    branchLimit,
+    decisionVertices: vertexCount,
+    vcDecisionChoices: vcDecisionCandidates.length,
+    initialForcedEdges: initialForced.forcedEdgeCount + capacity.forcedEdgeCount,
+    totalTourCost: covers.length > 0 ? -graph.n : NaN,
     bestFailureReason
   };
 }
@@ -3514,6 +3959,150 @@ function formatGraphColoringWitness(color, n) {
     values.push(`${vertex}:${graphColorName(color[vertex])}`);
   }
   return values.join(", ");
+}
+
+function selectedTrueVariables(assignment, count) {
+  const selected = [];
+  for (let variable = 1; variable <= count; variable++) {
+    if (assignment[variable] === 1) selected.push(variable);
+  }
+  return selected;
+}
+
+function setCoverAssignmentValid(assignment, universeSize, k, sets) {
+  const chosen = selectedTrueVariables(assignment, sets.length);
+  if (chosen.length > k) return false;
+  const covered = Array(universeSize + 1).fill(false);
+  for (const setIndex of chosen) {
+    for (const element of sets[setIndex - 1]) covered[element] = true;
+  }
+  for (let element = 1; element <= universeSize; element++) {
+    if (!covered[element]) return false;
+  }
+  return true;
+}
+
+function x3cAssignmentValid(assignment, universeSize, sets) {
+  if (universeSize % 3 !== 0) return false;
+  const chosen = selectedTrueVariables(assignment, sets.length);
+  if (chosen.length !== universeSize / 3) return false;
+  const coveredCount = Array(universeSize + 1).fill(0);
+  for (const setIndex of chosen) {
+    for (const element of sets[setIndex - 1]) coveredCount[element] += 1;
+  }
+  for (let element = 1; element <= universeSize; element++) {
+    if (coveredCount[element] !== 1) return false;
+  }
+  return true;
+}
+
+function graphColorFromAssignment(assignment, n, colorCount) {
+  const color = Array(n + 1).fill(0);
+  for (let vertex = 1; vertex <= n; vertex++) {
+    let selected = 0;
+    for (let candidateColor = 1; candidateColor <= colorCount; candidateColor++) {
+      const variable = colorCount * (vertex - 1) + candidateColor;
+      if (assignment[variable] !== 1) continue;
+      if (selected !== 0) return null;
+      selected = candidateColor;
+    }
+    if (selected === 0) return null;
+    color[vertex] = selected;
+  }
+  return color;
+}
+
+function graphColorAssignmentValid(assignment, n, colorCount, edges) {
+  const color = graphColorFromAssignment(assignment, n, colorCount);
+  if (!color) return false;
+  for (const [u, v] of edges) {
+    if (color[u] === color[v]) return false;
+  }
+  return true;
+}
+
+function sudokuGridFromAssignment(assignment, puzzle) {
+  const { n } = puzzle;
+  const grid = Array.from({ length: n }, () => Array(n).fill(0));
+  for (let row = 0; row < n; row++) {
+    for (let col = 0; col < n; col++) {
+      let selected = 0;
+      for (let digit = 1; digit <= n; digit++) {
+        const variable = ((row * n + col) * n) + digit;
+        if (assignment[variable] !== 1) continue;
+        if (selected !== 0) return null;
+        selected = digit;
+      }
+      if (selected === 0) return null;
+      grid[row][col] = selected;
+    }
+  }
+  return grid;
+}
+
+function sudokuAssignmentValid(assignment, puzzle) {
+  const { n, boxSize } = puzzle;
+  const grid = sudokuGridFromAssignment(assignment, puzzle);
+  if (!grid) return false;
+  const targetMask = (1n << BigInt(n)) - 1n;
+  const seenMask = values => {
+    let mask = 0n;
+    for (const value of values) {
+      if (value < 1 || value > n) return -1n;
+      const bit = 1n << BigInt(value - 1);
+      if ((mask & bit) !== 0n) return -1n;
+      mask |= bit;
+    }
+    return mask;
+  };
+  for (let row = 0; row < n; row++) {
+    if (seenMask(grid[row]) !== targetMask) return false;
+  }
+  for (let col = 0; col < n; col++) {
+    const values = [];
+    for (let row = 0; row < n; row++) values.push(grid[row][col]);
+    if (seenMask(values) !== targetMask) return false;
+  }
+  for (let boxRow = 0; boxRow < n; boxRow += boxSize) {
+    for (let boxCol = 0; boxCol < n; boxCol += boxSize) {
+      const values = [];
+      for (let row = boxRow; row < boxRow + boxSize; row++) {
+        for (let col = boxCol; col < boxCol + boxSize; col++) values.push(grid[row][col]);
+      }
+      if (seenMask(values) !== targetMask) return false;
+    }
+  }
+  return true;
+}
+
+function packingAssignmentValid(assignment, candidates) {
+  const selected = selectedTrueVariables(assignment, candidates.length).map(index => candidates[index - 1]);
+  if (selected.length === 0 && candidates.length > 0) return false;
+  const byItem = new Map();
+  for (const candidate of candidates) {
+    if (!byItem.has(candidate.itemId)) byItem.set(candidate.itemId, 0);
+  }
+  for (const candidate of selected) {
+    byItem.set(candidate.itemId, (byItem.get(candidate.itemId) || 0) + 1);
+  }
+  for (const count of byItem.values()) {
+    if (count !== 1) return false;
+  }
+  for (let left = 0; left < selected.length; left++) {
+    for (let right = left + 1; right < selected.length; right++) {
+      if (selected[left].itemId !== selected[right].itemId && packingBoxesOverlap(selected[left], selected[right])) return false;
+    }
+  }
+  return true;
+}
+
+function appendWitnessFromSatSearch(lines, search, witnessBuilder) {
+  if (!witnessBuilder || !search || !search.hamiltonianFound) return;
+  const witnessLines = witnessBuilder(search) || [];
+  if (witnessLines.length === 0) return;
+  append(lines);
+  append(lines, "Witnesses inferred from HC:");
+  witnessLines.forEach(line => append(lines, line));
 }
 
 function appendWitnessFromHc(lines, hc, witnessBuilder) {
@@ -4172,6 +4761,58 @@ function appendDirectVertexCoverHcReduction(lines, graph, sourceLabel, answerLab
   return hc;
 }
 
+function formatVertexCoverWitnessSearchSummary(search, graph) {
+  const lines = [];
+  append(lines, "NP-douce HC witness-choice result:");
+  append(lines, `HC nodes = ${graph.n}`);
+  if (graph.allowedEdgeKeys) append(lines, `allowed HC edges scored = ${graph.allowedEdgeKeys.size}`);
+  append(lines, `VC decision vertices checked = ${search.decisionVertices}`);
+  append(lines, `VC witness choices scored = ${search.vcDecisionChoices}`);
+  append(lines, `VC witness branches explored = ${search.explored}`);
+  append(lines, `VC witness branch limit = ${search.branchLimit}`);
+  append(lines, `VC assignments checked = ${search.assignmentsChecked}`);
+  append(lines, `HC backtrack tries = ${search.requestedBacktracks}`);
+  append(lines, `HC tour search mode = ${shouldStopAtFirstHcTour() ? "stop at first HC tour" : "search all tries"}`);
+  append(lines, `VC/degree-2 forced edges before choices = ${search.initialForcedEdges}`);
+  append(lines, `HC target cost = ${formatNumber(-graph.n)}`);
+  if (search.hamiltonianFound) {
+    append(lines, "HC decision: HAMILTONIAN CYCLE WITNESS ACCEPTED");
+    append(lines, `HC witness decision cost = ${formatNumber(search.totalTourCost)}`);
+  } else {
+    append(lines, "HC decision: HAMILTONIAN CYCLE WITNESS NOT FOUND");
+    if (search.bestFailureReason) append(lines, `best failed reason = ${search.bestFailureReason}`);
+  }
+  return lines.join("\n");
+}
+
+function appendVertexCoverWitnessHcReduction(lines, graph, vertexCount, coverLimit, edges, answerLabel, yesText = "YES", noText = "NO", witnessBuilder = null) {
+  const search = runVertexCoverWitnessHcDecisionSearch(graph, vertexCount, coverLimit, edges);
+  const summary = formatVertexCoverWitnessSearchSummary(search, graph);
+  append(lines);
+  append(lines, "Final answer:");
+  append(lines, search.hamiltonianFound
+    ? `${answerLabel} answer inferred from HC witness choices: ${yesText}`
+    : `${answerLabel} answer inferred from HC witness choices: NOT FOUND BY HC WITNESS SEARCH`);
+  if (witnessBuilder && search.hamiltonianFound) {
+    const witnessLines = witnessBuilder(search) || [];
+    if (witnessLines.length > 0) {
+      append(lines);
+      append(lines, "Witnesses inferred from HC:");
+      witnessLines.forEach(line => append(lines, line));
+    }
+  }
+  append(lines);
+  append(lines, summary);
+  return {
+    text: "",
+    summary,
+    totalTourCost: search.totalTourCost,
+    hamiltonianFound: search.hamiltonianFound,
+    notComputed: false,
+    vcWitnessSearch: search
+  };
+}
+
 function clauseLiteralsForVertexCoverTriangle(clause) {
   if (clause.length === 1) return [clause[0], clause[0], clause[0]];
   if (clause.length === 2) return [clause[0], clause[1], clause[1]];
@@ -4272,7 +4913,31 @@ function prepareSatViaVertexCoverForHc(sat, padding, materializeLimit = getHcSol
   return { simplified, vertexCover, graph, stats, skipped: false };
 }
 
-function appendSatViaVertexCoverHcReduction(lines, prepared, sourceLabel, answerLabel, yesText = "YES", noText = "NO", witnessBuilder = null) {
+function formatSatWitnessSearchSummary(search, graph) {
+  const lines = [];
+  append(lines, "NP-douce HC witness-choice result:");
+  append(lines, `HC nodes = ${graph.n}`);
+  if (graph.allowedEdgeKeys) append(lines, `allowed HC edges scored = ${graph.allowedEdgeKeys.size}`);
+  append(lines, `SAT decision variables checked = ${search.decisionVariableCount}`);
+  append(lines, `SAT witness choices scored = ${search.satDecisionChoices}`);
+  append(lines, `SAT witness branches explored = ${search.explored}`);
+  append(lines, `SAT witness branch limit = ${search.branchLimit}`);
+  append(lines, `SAT assignments checked = ${search.assignmentsChecked}`);
+  append(lines, `HC backtrack tries = ${search.requestedBacktracks}`);
+  append(lines, `HC tour search mode = ${shouldStopAtFirstHcTour() ? "stop at first HC tour" : "search all tries"}`);
+  append(lines, `VC/degree-2 forced edges before SAT choices = ${search.initialForcedEdges}`);
+  append(lines, `HC target cost = ${formatNumber(-graph.n)}`);
+  if (search.hamiltonianFound) {
+    append(lines, "HC decision: HAMILTONIAN CYCLE WITNESS ACCEPTED");
+    append(lines, `HC witness decision cost = ${formatNumber(search.totalTourCost)}`);
+  } else {
+    append(lines, "HC decision: HAMILTONIAN CYCLE WITNESS NOT FOUND");
+    if (search.bestFailureReason) append(lines, `best failed reason = ${search.bestFailureReason}`);
+  }
+  return lines.join("\n");
+}
+
+function appendSatViaVertexCoverHcReduction(lines, prepared, sourceLabel, answerLabel, yesText = "YES", noText = "NO", witnessBuilder = null, searchOptions = {}) {
   if (prepared.simplified.contradiction) {
     append(lines, "Final answer:");
     append(lines, `${answerLabel} answer after exact unit simplification: ${noText}`);
@@ -4281,7 +4946,7 @@ function appendSatViaVertexCoverHcReduction(lines, prepared, sourceLabel, answer
 
   if (prepared.skipped) {
     append(lines, "Final answer:");
-    append(lines, `${answerLabel} answer inferred from HC: NOT COMPUTED`);
+    append(lines, `${answerLabel} answer inferred from HC witness choices: NOT COMPUTED`);
     append(lines);
     append(lines, "Run summary:");
     append(lines, `estimated HC nodes after Vertex Cover gadget = ${prepared.stats.hcNodes}`);
@@ -4289,7 +4954,26 @@ function appendSatViaVertexCoverHcReduction(lines, prepared, sourceLabel, answer
     return { text: "", summary: "", totalTourCost: NaN, hamiltonianFound: false, notComputed: true };
   }
 
-  return appendDirectVertexCoverHcReduction(lines, prepared.graph, sourceLabel, answerLabel, yesText, noText, witnessBuilder);
+  const formulaVariableCount = searchOptions.formulaVariableCount || prepared.simplified.variableCount;
+  const formulaClauses = searchOptions.formulaClauses || prepared.simplified.clauses;
+  const search = runSatWitnessHcDecisionSearch(prepared, formulaVariableCount, formulaClauses, searchOptions);
+  const summary = formatSatWitnessSearchSummary(search, prepared.graph);
+  append(lines);
+  append(lines, "Final answer:");
+  append(lines, search.hamiltonianFound
+    ? `${answerLabel} answer inferred from HC witness choices: ${yesText}`
+    : `${answerLabel} answer inferred from HC witness choices: NOT FOUND BY HC WITNESS SEARCH`);
+  appendWitnessFromSatSearch(lines, search, witnessBuilder);
+  append(lines);
+  append(lines, summary);
+  return {
+    text: "",
+    summary,
+    totalTourCost: search.totalTourCost,
+    hamiltonianFound: search.hamiltonianFound,
+    notComputed: false,
+    satWitnessSearch: search
+  };
 }
 
 function runVertexCover(text) {
@@ -4297,12 +4981,12 @@ function runVertexCover(text) {
   const graph = buildDirectVertexCoverHcGraph(n, k, edges, padding);
 
   const lines = [];
-  appendDirectVertexCoverHcReduction(lines, graph, "Vertex Cover direct HC reduction", "Vertex Cover", "YES", "NO", () => {
+  appendVertexCoverWitnessHcReduction(lines, graph, n, k, normalizeUndirectedEdges(n, edges), "Vertex Cover", "YES", "NO", search => {
     const limit = witnessDisplayLimit();
-    const covers = collectVertexCovers(n, k, edges, limit);
+    const covers = search.covers.slice(0, limit).map(item => item.cover);
     if (covers.length === 0) return ["vertex cover witness unavailable even though HC returned YES"];
     return [
-      `vertex covers shown = ${covers.length} / limit ${limit}`,
+      `vertex covers shown = ${covers.length} / found ${search.covers.length}`,
       ...covers.map((cover, index) => `${index + 1}. vertex cover = ${formatSet(cover)}; cover size = ${cover.length} / k=${k}`)
     ];
   });
@@ -4327,17 +5011,19 @@ function runClique(text) {
     return lines.join("\n");
   }
 
-  appendDirectVertexCoverHcReduction(lines, graph, "Clique via direct Vertex Cover HC reduction", "Clique", "YES", "NO", () => {
+  appendVertexCoverWitnessHcReduction(lines, graph, n, vertexCoverK, complementEdges, "Clique", "YES", "NO", search => {
     const limit = witnessDisplayLimit();
-    const cliques = collectCliques(n, k, edges, limit);
+    const cliques = search.covers.slice(0, limit).map(item => {
+      const coverSet = new Set(item.cover);
+      const clique = [];
+      for (let vertex = 1; vertex <= n; vertex++) if (!coverSet.has(vertex)) clique.push(vertex);
+      return { clique, cover: item.cover };
+    });
     if (cliques.length === 0) return ["clique witness unavailable even though HC returned YES"];
     return [
-      `cliques shown = ${cliques.length} / limit ${limit}`,
-      ...cliques.map((clique, index) => {
-        const cliqueSet = new Set(clique);
-        const complementCover = [];
-        for (let vertex = 1; vertex <= n; vertex++) if (!cliqueSet.has(vertex)) complementCover.push(vertex);
-        return `${index + 1}. clique = ${formatSet(clique)}; complement vertex cover = ${formatSet(complementCover)}; clique size = ${clique.length} / requested k=${k}`;
+      `cliques shown = ${cliques.length} / found ${search.covers.length}`,
+      ...cliques.map((item, index) => {
+        return `${index + 1}. clique = ${formatSet(item.clique)}; complement vertex cover = ${formatSet(item.cover)}; clique size = ${item.clique.length} / requested k=${k}`;
       })
     ];
   });
@@ -4357,17 +5043,19 @@ function runIndependentSet(text) {
     return lines.join("\n");
   }
 
-  appendDirectVertexCoverHcReduction(lines, graph, "Independent Set via direct Vertex Cover HC reduction", "Independent Set", "YES", "NO", () => {
+  appendVertexCoverWitnessHcReduction(lines, graph, n, vertexCoverK, edges, "Independent Set", "YES", "NO", search => {
     const limit = witnessDisplayLimit();
-    const independentSets = collectIndependentSets(n, k, edges, limit);
+    const independentSets = search.covers.slice(0, limit).map(item => {
+      const coverSet = new Set(item.cover);
+      const independent = [];
+      for (let vertex = 1; vertex <= n; vertex++) if (!coverSet.has(vertex)) independent.push(vertex);
+      return { independent, cover: item.cover };
+    });
     if (independentSets.length === 0) return ["independent set witness unavailable even though HC returned YES"];
     return [
-      `independent sets shown = ${independentSets.length} / limit ${limit}`,
-      ...independentSets.map((independent, index) => {
-        const independentSet = new Set(independent);
-        const cover = [];
-        for (let vertex = 1; vertex <= n; vertex++) if (!independentSet.has(vertex)) cover.push(vertex);
-        return `${index + 1}. independent set = ${formatSet(independent)}; vertex cover = ${formatSet(cover)}; independent set size = ${independent.length} / requested k=${k}`;
+      `independent sets shown = ${independentSets.length} / found ${search.covers.length}`,
+      ...independentSets.map((item, index) => {
+        return `${index + 1}. independent set = ${formatSet(item.independent)}; vertex cover = ${formatSet(item.cover)}; independent set size = ${item.independent.length} / requested k=${k}`;
       })
     ];
   });
@@ -4380,14 +5068,31 @@ function runSetCover(text) {
   const prepared = prepareSatViaVertexCoverForHc(sat, padding);
 
   const lines = [];
-  appendSatViaVertexCoverHcReduction(lines, prepared, "Set Cover via 3-SAT -> Vertex Cover -> direct HC", "Set Cover", "YES", "NO", () => {
+  appendSatViaVertexCoverHcReduction(lines, prepared, "Set Cover via 3-SAT -> Vertex Cover -> direct HC", "Set Cover", "YES", "NO", search => {
     const limit = witnessDisplayLimit();
-    const covers = collectSetCovers(universeSize, k, sets, limit);
+    const covers = search.satisfyingAssignments
+      .slice(0, limit)
+      .map(item => selectedTrueVariables(item.decisionAssignment || item.assignment, setCount));
     if (covers.length === 0) return ["set cover witness unavailable even though HC returned YES"];
     return [
-      `set covers shown = ${covers.length} / limit ${limit}`,
+      `set covers shown = ${covers.length} / found ${search.satisfyingAssignments.length}`,
       ...covers.map((cover, index) => `${index + 1}. selected set indices = ${formatSet(cover)}; ${formatSetCoverWitness(cover, sets)}; sets selected = ${cover.length} / k=${k}`)
     ];
+  }, {
+    formulaVariableCount: sat.variableCount,
+    formulaClauses: sat.clauses,
+    decisionVariableCount: setCount,
+    assignmentValidator: assignment => setCoverAssignmentValid(assignment, universeSize, k, sets),
+    partialAssignmentValidator: assignment => selectedTrueVariables(assignment, setCount).length <= k,
+    forcedDecisionsAfterChoice: (candidate, assignment) => {
+      if (candidate.value !== 1) return [];
+      if (selectedTrueVariables(assignment, setCount).length < k) return [];
+      const forced = [];
+      for (let setIndex = 1; setIndex <= setCount; setIndex++) {
+        if (assignment[setIndex] === -1) forced.push({ variable: setIndex, value: 0 });
+      }
+      return forced;
+    }
   });
   return lines.join("\n");
 }
@@ -4399,14 +5104,40 @@ function runX3c(text) {
   const targetSetCount = universeSize % 3 === 0 ? universeSize / 3 : "not integral";
 
   const lines = [];
-  appendSatViaVertexCoverHcReduction(lines, prepared, "X3C via 3-SAT -> Vertex Cover -> direct HC", "X3C", "YES", "NO", () => {
+  appendSatViaVertexCoverHcReduction(lines, prepared, "X3C via 3-SAT -> Vertex Cover -> direct HC", "X3C", "YES", "NO", search => {
     const limit = witnessDisplayLimit();
-    const exactCovers = collectX3cCovers(universeSize, sets, limit);
+    const exactCovers = search.satisfyingAssignments
+      .slice(0, limit)
+      .map(item => selectedTrueVariables(item.decisionAssignment || item.assignment, setCount));
     if (exactCovers.length === 0) return ["exact cover witness unavailable even though HC returned YES"];
     return [
-      `exact covers shown = ${exactCovers.length} / limit ${limit}`,
+      `exact covers shown = ${exactCovers.length} / found ${search.satisfyingAssignments.length}`,
       ...exactCovers.map((exactCover, index) => `${index + 1}. selected 3-set indices = ${formatSet(exactCover)}; ${formatSetCoverWitness(exactCover, sets)}; sets selected = ${exactCover.length} / target=${targetSetCount}`)
     ];
+  }, {
+    formulaVariableCount: sat.variableCount,
+    formulaClauses: sat.clauses,
+    decisionVariableCount: setCount,
+    assignmentValidator: assignment => x3cAssignmentValid(assignment, universeSize, sets),
+    partialAssignmentValidator: assignment => universeSize % 3 === 0 && selectedTrueVariables(assignment, setCount).length <= universeSize / 3,
+    forcedDecisionsAfterChoice: (candidate, assignment) => {
+      if (candidate.value !== 1) return [];
+      const chosenSet = sets[candidate.variable - 1] || [];
+      const chosenElements = new Set(chosenSet);
+      const forced = [];
+      for (let setIndex = 1; setIndex <= setCount; setIndex++) {
+        if (setIndex === candidate.variable) continue;
+        if ((sets[setIndex - 1] || []).some(element => chosenElements.has(element))) {
+          forced.push({ variable: setIndex, value: 0 });
+        }
+      }
+      if (universeSize % 3 === 0 && selectedTrueVariables(assignment, setCount).length >= universeSize / 3) {
+        for (let setIndex = 1; setIndex <= setCount; setIndex++) {
+          if (assignment[setIndex] === -1) forced.push({ variable: setIndex, value: 0 });
+        }
+      }
+      return forced;
+    }
   });
   return lines.join("\n");
 }
@@ -4422,14 +5153,50 @@ function runGraphColoring(text) {
   const prepared = prepareSatViaVertexCoverForHc(sat, padding);
 
   const lines = [];
-  appendSatViaVertexCoverHcReduction(lines, prepared, "Graph Coloring via 3-SAT -> Vertex Cover -> direct HC", "Graph Coloring", "YES", "NO", () => {
+  appendSatViaVertexCoverHcReduction(lines, prepared, "Graph Coloring via 3-SAT -> Vertex Cover -> direct HC", "Graph Coloring", "YES", "NO", search => {
     const limit = witnessDisplayLimit();
-    const colorings = collectGraphColorings(n, colorCount, edges, limit);
+    const colorings = search.satisfyingAssignments
+      .slice(0, limit)
+      .map(item => graphColorFromAssignment(item.decisionAssignment || item.assignment, n, colorCount))
+      .filter(Boolean);
     if (colorings.length === 0) return ["coloring witness unavailable even though HC returned YES"];
     return [
-      `colorings shown = ${colorings.length} / limit ${limit}`,
+      `colorings shown = ${colorings.length} / found ${search.satisfyingAssignments.length}`,
       ...colorings.map((color, index) => `${index + 1}. coloring = ${formatGraphColoringWitness(color, n)}; colors used = ${formatSet(Array.from(new Set(color.slice(1))).sort((a, b) => a - b).map(graphColorName))}`)
     ];
+  }, {
+    formulaVariableCount: sat.variableCount,
+    formulaClauses: sat.clauses,
+    decisionVariableCount: n * colorCount,
+    assignmentValidator: assignment => graphColorAssignmentValid(assignment, n, colorCount, edges),
+    partialAssignmentValidator: assignment => {
+      for (let vertex = 1; vertex <= n; vertex++) {
+        let trueCount = 0;
+        for (let candidateColor = 1; candidateColor <= colorCount; candidateColor++) {
+          if (assignment[colorCount * (vertex - 1) + candidateColor] === 1) trueCount += 1;
+        }
+        if (trueCount > 1) return false;
+      }
+      for (const [u, v] of edges) {
+        for (let candidateColor = 1; candidateColor <= colorCount; candidateColor++) {
+          if (assignment[colorCount * (u - 1) + candidateColor] === 1 &&
+              assignment[colorCount * (v - 1) + candidateColor] === 1) return false;
+        }
+      }
+      return true;
+    },
+    decisionCandidateFilter: candidate => candidate.value === 1,
+    forcedDecisionsAfterChoice: candidate => {
+      if (candidate.value !== 1) return [];
+      const vertex = Math.floor((candidate.variable - 1) / colorCount) + 1;
+      const chosenColor = ((candidate.variable - 1) % colorCount) + 1;
+      const forced = [];
+      for (let candidateColor = 1; candidateColor <= colorCount; candidateColor++) {
+        if (candidateColor === chosenColor) continue;
+        forced.push({ variable: colorCount * (vertex - 1) + candidateColor, value: 0 });
+      }
+      return forced;
+    }
   });
   return lines.join("\n");
 }
@@ -4443,27 +5210,76 @@ function runSudoku() {
   const stats = compactMode && !prepared.simplified.contradiction
     ? prepared.stats
     : estimateSatToVertexCoverReduction(sat.variableCount, sat.clauseCount || 0, 0);
-  let hc = null;
-  let solution = null;
   const lines = [];
   if (compactMode && prepared.simplified.contradiction) {
     append(lines, "Final answer:");
-    append(lines, "Sudoku answer inferred from HC: NO SOLUTION");
+    append(lines, "Sudoku answer after exact unit simplification: NO SOLUTION");
   }
   if (compactMode && !prepared.simplified.contradiction && !prepared.skipped) {
-    hc = appendDirectVertexCoverHcReduction(lines, prepared.graph, "Sudoku via 3-SAT -> Vertex Cover -> direct HC", "Sudoku", "SOLUTION EXISTS", "NO SOLUTION");
-    if (hc.hamiltonianFound) {
-      solution = solveSudokuPuzzle(puzzle);
-      if (solution) {
-        applySudokuSolution(puzzle, solution);
-        append(lines);
-        append(lines, "Sudoku witness inferred from HC:");
-        append(lines, formatSudokuGrid(solution, puzzle.symbols));
+    appendSatViaVertexCoverHcReduction(lines, prepared, "Sudoku via 3-SAT -> Vertex Cover -> direct HC", "Sudoku", "SOLUTION EXISTS", "NO SOLUTION", search => {
+      const item = search.satisfyingAssignments[0];
+      if (!item) return ["Sudoku witness unavailable even though HC returned YES"];
+      const solution = sudokuGridFromAssignment(item.decisionAssignment || item.assignment, puzzle);
+      if (!solution) return ["Sudoku witness assignment could not be converted to a grid"];
+      applySudokuSolution(puzzle, solution);
+      return ["Sudoku grid:", formatSudokuGrid(solution, puzzle.symbols)];
+    }, {
+      formulaVariableCount: sat.variableCount,
+      formulaClauses: sat.clauses,
+      decisionVariableCount: sat.baseVariableCount,
+      assignmentValidator: assignment => sudokuAssignmentValid(assignment, puzzle),
+      partialAssignmentValidator: assignment => {
+        const hasDuplicateTrue = variables => {
+          let seen = 0;
+          for (const variable of variables) {
+            if (assignment[variable] === 1) seen += 1;
+          }
+          return seen > 1;
+        };
+        for (let row = 0; row < puzzle.n; row++) {
+          for (let digit = 1; digit <= puzzle.n; digit++) {
+            const variables = [];
+            for (let col = 0; col < puzzle.n; col++) variables.push(((row * puzzle.n + col) * puzzle.n) + digit);
+            if (hasDuplicateTrue(variables)) return false;
+          }
+        }
+        for (let col = 0; col < puzzle.n; col++) {
+          for (let digit = 1; digit <= puzzle.n; digit++) {
+            const variables = [];
+            for (let row = 0; row < puzzle.n; row++) variables.push(((row * puzzle.n + col) * puzzle.n) + digit);
+            if (hasDuplicateTrue(variables)) return false;
+          }
+        }
+        for (let boxRow = 0; boxRow < puzzle.n; boxRow += puzzle.boxSize) {
+          for (let boxCol = 0; boxCol < puzzle.n; boxCol += puzzle.boxSize) {
+            for (let digit = 1; digit <= puzzle.n; digit++) {
+              const variables = [];
+              for (let row = boxRow; row < boxRow + puzzle.boxSize; row++) {
+                for (let col = boxCol; col < boxCol + puzzle.boxSize; col++) variables.push(((row * puzzle.n + col) * puzzle.n) + digit);
+              }
+              if (hasDuplicateTrue(variables)) return false;
+            }
+          }
+        }
+        return true;
+      },
+      decisionCandidateFilter: candidate => candidate.value === 1,
+      forcedDecisionsAfterChoice: candidate => {
+        if (candidate.value !== 1) return [];
+        const zeroBased = candidate.variable - 1;
+        const cellIndex = Math.floor(zeroBased / puzzle.n);
+        const currentDigit = (zeroBased % puzzle.n) + 1;
+        const forced = [];
+        for (let digit = 1; digit <= puzzle.n; digit++) {
+          if (digit === currentDigit) continue;
+          forced.push({ variable: (cellIndex * puzzle.n) + digit, value: 0 });
+        }
+        return forced;
       }
-    }
+    });
   } else if (!compactMode || !prepared.simplified.contradiction) {
     append(lines, "Final answer:");
-    append(lines, "Sudoku answer inferred from HC: NOT COMPUTED");
+    append(lines, "Sudoku answer inferred from HC witness choices: NOT COMPUTED");
     append(lines);
     append(lines, "Run summary:");
     append(lines, `estimated HC nodes after Vertex Cover gadget = ${stats.hcNodes}`);
@@ -4776,6 +5592,7 @@ function buildPackingCandidateReduction(input, packed) {
     rawClauseCount,
     generatedCandidates: candidates.length,
     keptCandidates: kept.length,
+    candidatePlacements: kept,
     itemCount: items.length,
     impossibleReasons,
     pruned: candidates.length > kept.length
@@ -4878,12 +5695,38 @@ function runPacking3d() {
   const reduction = buildPackingCandidateReduction(input, packed);
   const prepared = prepareSatViaVertexCoverForHc(reduction, 0);
   const lines = [];
-  appendSatViaVertexCoverHcReduction(lines, prepared, "3D packing via 3-SAT -> Vertex Cover -> direct HC", "Packing candidate model", "YES", "NO", () => {
-    if (packed.placed.length === 0) return ["no packed box placements in the current candidate manifest"];
+  appendSatViaVertexCoverHcReduction(lines, prepared, "3D packing via 3-SAT -> Vertex Cover -> direct HC", "Packing candidate model", "YES", "NO", search => {
+    const item = search.satisfyingAssignments[0];
+    if (!item) return ["no packed box placements in the current candidate manifest"];
+    const selected = selectedTrueVariables(item.decisionAssignment || item.assignment, reduction.keptCandidates)
+      .map(index => reduction.candidatePlacements[index - 1])
+      .filter(Boolean);
+    if (selected.length === 0) return ["no packed box placements selected by the HC witness choices"];
     return [
-      `packed boxes = ${formatSet(packed.placed.map(box => box.id))}`,
+      `packed boxes = ${formatSet(selected.map(box => box.itemId))}`,
+      ...selected.map((box, index) => `${index + 1}. ${box.itemId} at (${box.x},${box.y},${box.z}) size ${box.l}x${box.w}x${box.h}`),
       `unpacked boxes = ${formatSet(packed.unpacked.map(item => item.id))}`
     ];
+  }, {
+    formulaVariableCount: reduction.variableCount,
+    formulaClauses: reduction.clauses,
+    decisionVariableCount: reduction.keptCandidates,
+    assignmentValidator: assignment => packingAssignmentValid(assignment, reduction.candidatePlacements || []),
+    partialAssignmentValidator: assignment => {
+      const candidates = reduction.candidatePlacements || [];
+      const selected = selectedTrueVariables(assignment, candidates.length).map(index => candidates[index - 1]);
+      const seenItems = new Set();
+      for (const candidate of selected) {
+        if (seenItems.has(candidate.itemId)) return false;
+        seenItems.add(candidate.itemId);
+      }
+      for (let left = 0; left < selected.length; left++) {
+        for (let right = left + 1; right < selected.length; right++) {
+          if (selected[left].itemId !== selected[right].itemId && packingBoxesOverlap(selected[left], selected[right])) return false;
+        }
+      }
+      return true;
+    }
   });
   return lines.join("\n");
 }
@@ -5066,8 +5909,9 @@ function run3SatCompressed(text) {
   append(lines, `allowed HC edges scored = ${prepared.graph.allowedEdgeKeys.size}`);
   append(lines, `SAT witness choices scored = ${search.satDecisionChoices}`);
   append(lines, `SAT witness branches explored = ${search.explored}`);
+  append(lines, `SAT witness branch limit = ${search.branchLimit}`);
   append(lines, `SAT assignments checked = ${search.assignmentsChecked}`);
-  append(lines, `HC backtrack tries = ${search.requestedTries}`);
+  append(lines, `HC backtrack tries = ${search.requestedBacktracks}`);
   append(lines, `HC tour search mode = ${shouldStopAtFirstHcTour() ? "stop at first HC tour" : "search all tries"}`);
   append(lines, `VC/degree-2 forced edges before SAT choices = ${search.initialForcedEdges}`);
   if (search.hamiltonianFound) {
@@ -5151,6 +5995,19 @@ function compactRunOutput(text, elapsedMs) {
     /^HC tour search mode = /,
     /^backtrack try limit = /,
     /^requested backtrack tries = /,
+    /^allowed HC edges scored = /,
+    /^SAT decision variables checked = /,
+    /^SAT witness choices scored = /,
+    /^SAT witness branches explored = /,
+    /^SAT witness branch limit = /,
+    /^SAT assignments checked = /,
+    /^VC decision vertices checked = /,
+    /^VC witness choices scored = /,
+    /^VC witness branches explored = /,
+    /^VC witness branch limit = /,
+    /^VC assignments checked = /,
+    /^VC\/degree-2 forced edges before SAT choices = /,
+    /^VC\/degree-2 forced edges before choices = /,
     /^HC tour cost = /,
     /^best tour cost = /,
     /^HC target cost = /,

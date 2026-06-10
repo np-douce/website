@@ -44,13 +44,13 @@ The HC solver now uses the importance score automatically: `lnZ(CE + e) - lnZ(CE
 
 Adaptive beta is automatic. Each choice step recomputes the current conditioned standard deviation and uses `1 / current standard deviation`.
 
-Score-guided backtracking is controlled by `HC backtrack tries`. `HC tour search` can either stop when the first Hamiltonian tour is found or keep searching all allowed tries and list the distinct HC/minimum tours it finds. Matrix, points, and manual weighted tabs keep using the all-tries best-tour behavior. The visible solver tuning is the HC solve node limit, `HC backtrack tries`, `HC repair passes`, and `HC tour search`.
+Score-guided backtracking is controlled by `HC backtrack tries`, which defaults to `0`. On SAT-based reduction tabs, `0` means one greedy SAT witness branch with no saved alternatives; raising the value queues next-best witness branches. `HC tour search` can either stop when the first Hamiltonian witness is accepted or keep searching all allowed tries and list distinct witnesses it finds. Matrix, points, and manual weighted tabs keep using the all-tries best-tour behavior. The visible solver tuning is the HC solve node limit, `HC backtrack tries`, `HC repair passes`, and `HC tour search`.
 
 Candidate edges are normalized with the state function omega. For each valid edge, the app uses the count term `N(e) = 2^(CE - 1) * (n - 1 - VCE + CE)!`, computes `L(e) = ln(N(e)) - beta * mean + 0.5 * beta^2 * variance`, shifts by `M = max L`, then uses `P(e) = exp(L(e) - M) / omega` with `omega = sum exp(L(f) - M)`.
 
 Before scoring, the HC solver runs the original degree-2 forced-edge precheck: if a vertex has exactly two listed HC edges, both are forced into the tour before the scoring loop continues. The stronger dynamic pruning experiment was removed because it was slower and rejected useful branches on the reduction tabs.
 
-`HC repair passes` runs local repair after the math-selected tour. The repair keeps the original HC math as the first pass, fills unfinished reduction tours with neutral zero placeholders, then accepts only 2-opt or targeted 3-opt swaps that lower the final tour cost toward the Hamiltonian target.
+`HC repair passes` defaults to `0`. When raised for raw HC/TSP-style tours, it runs local repair after the math-selected tour. SAT-based reduction tabs do not need repair to complete unrelated HC edges after their original decision witnesses are committed.
 
 ## 3-SAT input format
 
@@ -106,7 +106,9 @@ The app uses the direct classic Vertex Cover to Hamiltonian Cycle construction. 
 
 Incident rows for the same original vertex are linked as `u6 -> next u1`, so the degree-2 precheck collapses most of each gadget before the remaining selector and cross edges are scored by the HC solver.
 
-On the 3-SAT tab, the browser now scores the SAT variable witness choices first. For `V` SAT variables, that means `2V` logical witness choices. Each choice is represented by a paired HC diagonal decision; either valid diagonal commits the same VC consequence, then the gadget propagation forces the paired chain. After the SAT variables are committed, the tab checks the inferred assignment instead of spending time scoring unrelated HC completion edges.
+On the 3-SAT tab and the tabs that pass through generated 3-SAT, the browser now scores SAT witness choices first. For `V` checked Boolean decision variables, that means `2V` logical witness choices. Each choice is represented by a paired HC diagonal decision; either valid diagonal commits the same VC consequence, then the gadget propagation forces the paired chain. After the relevant original decision variables are committed, the tab checks the inferred original witness instead of spending time scoring unrelated HC completion edges. Set Cover and X3C check selected set variables, Graph Coloring checks vertex-color choices, Sudoku checks placement choices, and Packing checks candidate placement choices.
+
+The direct Vertex Cover tab now uses the same witness-choice pattern. For `n` original vertices, it scores `2n` logical choices: `cover(v)` and `not cover(v)`. Clique and Independent Set inherit this through their Vertex Cover reductions. After all original vertices are committed or forced, the app validates the original cover, clique, or independent set witness instead of scoring unrelated HC completion edges.
 
 Node count for this direct reduction is roughly:
 
