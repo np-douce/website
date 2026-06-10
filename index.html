@@ -3,47 +3,60 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>NP-douce 1.0</title>
+  <title>NP-douce 1.1</title>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="topbar">
     <div>
-      <h1>NP-douce 1.0</h1>
+      <h1>NP-douce 1.1</h1>
       <p>Hamiltonian cycle, TSP theory calculations, and 3-SAT reduction tools.</p>
     </div>
-    <div class="badge">Version 1.0 · Offline browser app</div>
+    <div class="badge">Version 1.1 - Offline browser app</div>
   </header>
 
   <main class="layout">
-    <nav class="tabs" aria-label="Solvers">
-      <button class="tab active" data-panel="sat3">3-SAT reduction</button>
-      <button class="tab" data-panel="vertexCover">Vertex cover</button>
-      <button class="tab" data-panel="clique">Clique</button>
-      <button class="tab" data-panel="independentSet">Independent set</button>
-      <button class="tab" data-panel="setCover">Set cover</button>
-      <button class="tab" data-panel="x3c">X3C</button>
-      <button class="tab" data-panel="graphColoring">Graph coloring</button>
-      <button class="tab" data-panel="sudoku">Sudoku</button>
-      <button class="tab" data-panel="packing3d">3D packing</button>
-      <button class="tab" data-panel="pairs">Hamiltonian pairs</button>
-      <button class="tab" data-panel="matrix">Matrix</button>
-      <button class="tab" data-panel="points">Points</button>
-      <button class="tab" data-panel="manual">Manual edges</button>
-    </nav>
-    <div class="globalControls">
-      <label>HC solve node limit<input id="hcSolveNodeLimit" type="number" min="0" step="1" value="1000"></label>
-      <label>HC backtrack tries<input id="hcBacktrackTries" type="number" min="0" max="500" step="1" value="0"></label>
-      <label>HC repair passes<input id="hcRepairPasses" type="number" min="0" max="100" step="1" value="0"></label>
-      <label>HC tour search<select id="hcTourSearchMode">
-        <option value="all" selected>Search all tries</option>
-        <option value="first">Stop at first HC tour</option>
-      </select></label>
-      <p class="fieldNote">Importance scoring and adaptive beta are automatic. Reduction tabs infer answers only when the reduced HC graph is at or under this limit. Backtracking retries the next best scored HC branches; larger values can run very slowly.</p>
-    </div>
+    <aside class="solverRail">
+      <div class="railTitle">Solvers</div>
+      <nav class="tabs" aria-label="Solvers">
+        <div class="tabGroup">
+          <span class="tabGroupLabel">HC reductions</span>
+          <button class="tab active" data-panel="sat3">3-SAT</button>
+          <button class="tab" data-panel="vertexCover">Vertex cover</button>
+          <button class="tab" data-panel="clique">Clique</button>
+          <button class="tab" data-panel="independentSet">Independent set</button>
+          <button class="tab" data-panel="setCover">Set cover</button>
+          <button class="tab" data-panel="x3c">X3C</button>
+          <button class="tab" data-panel="graphColoring">Graph coloring</button>
+          <button class="tab" data-panel="packing3d">3D packing</button>
+        </div>
+        <div class="tabGroup">
+          <span class="tabGroupLabel">Direct HC</span>
+          <button class="tab" data-panel="pairs">Hamiltonian pairs</button>
+        </div>
+        <div class="tabGroup">
+          <span class="tabGroupLabel">TSP</span>
+          <button class="tab" data-panel="matrix">TSP matrix</button>
+          <button class="tab" data-panel="points">TSP points</button>
+          <button class="tab" data-panel="manual">TSP manual</button>
+        </div>
+      </nav>
+    </aside>
 
-    <section class="workspace">
+    <section class="appBody">
+      <div class="globalControls">
+        <label>HC solve node limit<input id="hcSolveNodeLimit" type="number" min="0" step="1" value="1000"></label>
+        <label>HC backtrack tries<input id="hcBacktrackTries" type="number" min="0" max="500" step="1" value="0"></label>
+        <label>HC repair passes<input id="hcRepairPasses" type="number" min="0" max="100" step="1" value="0"></label>
+        <label>HC tour search<select id="hcTourSearchMode">
+          <option value="all" selected>Search all tries</option>
+          <option value="first">Stop at first HC tour</option>
+        </select></label>
+        <p class="fieldNote">Importance scoring and adaptive beta are automatic. Reduction tabs infer answers only when the reduced HC graph is at or under this limit. Backtracking retries the next best scored HC branches; larger values can run very slowly.</p>
+      </div>
+
+      <section class="workspace">
       <section id="sat3" class="panel active">
         <div class="panelHead">
           <h2>3-SAT to Hamiltonian Cycle</h2>
@@ -150,28 +163,6 @@
         </div>
       </section>
 
-      <section id="sudoku" class="panel widePanel">
-        <div class="panelHead">
-          <h2>Sudoku to Hamiltonian Cycle</h2>
-          <p>Visual Sudoku solver with the exact placement reduction: Sudoku -> exact cover style 3-SAT -> Vertex Cover -> Hamiltonian Cycle.</p>
-        </div>
-
-        <div class="formGrid">
-          <label>Box size<input id="sudokuBoxSize" type="number" min="1" max="5" step="1" value="3"></label>
-          <label>Dense HC calculation node limit<input id="sudokuHcLimit" type="number" min="0" step="1" value="10000"></label>
-        </div>
-        <p class="fieldNote">Box size 3 means a 9x9 Sudoku, 4 means 16x16, and 5 means 25x25. Even 9x9 creates far more than 1000 HC nodes, so it reports NOT COMPUTED unless you raise the HC limits.</p>
-
-        <div class="controls">
-          <button id="buildSudokuGrid" type="button">Build grid</button>
-          <button id="loadSudokuExample" type="button">Load 9x9 example</button>
-          <button id="clearSudokuGrid" type="button">Clear grid</button>
-          <button id="runSudoku" type="button">Run Sudoku reduction</button>
-        </div>
-
-        <div id="sudokuGrid" class="sudokuGrid" aria-label="Sudoku grid"></div>
-      </section>
-
       <section id="packing3d" class="panel widePanel">
         <div class="panelHead">
           <h2>3D Packing to Hamiltonian Cycle</h2>
@@ -272,7 +263,7 @@
 
       <section id="matrix" class="panel">
         <div class="panelHead">
-          <h2>Weight Matrix</h2>
+          <h2>TSP Weight Matrix</h2>
           <p>First line is <code>n</code>, followed by an <code>n x n</code> symmetric weight matrix.</p>
         </div>
         <label>Matrix data</label>
@@ -283,13 +274,13 @@
 7 0 8 0</textarea>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="matrixFile" accept=".txt"></label>
-          <button id="runMatrix">Run matrix solver</button>
+          <button id="runMatrix">Run TSP matrix</button>
         </div>
       </section>
 
       <section id="points" class="panel">
         <div class="panelHead">
-          <h2>Euclidean Points</h2>
+          <h2>TSP Euclidean Points</h2>
           <p>First line is <code>n</code>, followed by <code>x y</code> point coordinates.</p>
         </div>
         <label>Points data</label>
@@ -300,13 +291,13 @@
 0 1</textarea>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="pointsFile" accept=".txt"></label>
-          <button id="runPoints">Run points solver</button>
+          <button id="runPoints">Run TSP points</button>
         </div>
       </section>
 
       <section id="manual" class="panel">
         <div class="panelHead">
-          <h2>Manual Complete Graph</h2>
+          <h2>TSP Manual Weights</h2>
           <p>First line is <code>n</code>, then one upper-triangle weight per line in order: <code>(1,2), (1,3), ...</code>.</p>
         </div>
         <label>Manual edge data</label>
@@ -319,7 +310,7 @@
 8</textarea>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="manualFile" accept=".txt"></label>
-          <button id="runManual">Run manual solver</button>
+          <button id="runManual">Run TSP manual</button>
         </div>
       </section>
 
@@ -329,6 +320,7 @@
           <button id="clearOutput" title="Clear output">Clear</button>
         </div>
         <pre id="output">Ready.</pre>
+      </section>
       </section>
     </section>
   </main>

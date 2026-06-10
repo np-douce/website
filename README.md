@@ -1,4 +1,4 @@
-# NP-douce 1.0
+# NP-douce 1.1
 
 Open `index.html` in a browser to run the app.
 
@@ -13,12 +13,11 @@ The app is static: it uses only local HTML, CSS, and JavaScript. No server is re
 - Set Cover to 3-SAT to Vertex Cover to direct Hamiltonian-cycle reduction
 - X3C to 3-SAT to Vertex Cover to direct Hamiltonian-cycle reduction
 - Graph Coloring to 3-SAT to Vertex Cover to direct Hamiltonian-cycle reduction
-- Visual Sudoku to exact-cover 3-SAT to Vertex Cover to direct Hamiltonian-cycle reduction
 - 3D truck/container packing with candidate-placement 3-SAT to Vertex Cover to HC
 - Hamiltonian pairs input
-- Matrix input
-- Euclidean points input
-- Manual upper-triangle edge input
+- TSP matrix input
+- TSP Euclidean points input
+- TSP manual upper-triangle edge input
 
 ## Math note
 
@@ -32,7 +31,7 @@ Reduction tabs now use this strict flow for their displayed answer:
 original problem -> reduction -> HC graph -> NP-douce HC solver -> inferred original answer
 ```
 
-When the HC solver returns YES, reduction tabs print concrete original-problem witnesses, such as SAT assignments, vertex covers, cliques, independent sets, selected sets, colorings, Sudoku grids, or packing placement summaries. The displayed witness count is capped by `HC backtrack tries`. Raw HC and TSP-style tabs also print the best tour order, not just the tour weight. The app screen is compacted to the final answer, witness lines, node counts, key run settings, and elapsed time instead of the full solver trace. Verbose preambles, hidden edge/formula manifests, and duplicate display-only prechecks are skipped so compact runs do less formatting work.
+When the HC solver returns YES, reduction tabs print concrete original-problem witnesses, such as SAT assignments, vertex covers, cliques, independent sets, selected sets, colorings, or packing placement summaries. The displayed witness count is capped by `HC backtrack tries`. Raw HC and TSP-style tabs also print the best tour order, not just the tour weight. The app screen is compacted to the final answer, witness lines, node counts, key run settings, and elapsed time instead of the full solver trace. Verbose preambles, hidden edge/formula manifests, and duplicate display-only prechecks are skipped so compact runs do less formatting work.
 
 If the reduced HC graph is above the app's `HC solve node limit`, the tab reports `NOT COMPUTED` instead of using a separate direct solver. Raise the limit when you want to force a larger reduced HC instance through the solver, but large values can run very slowly.
 
@@ -106,7 +105,7 @@ The app uses the direct classic Vertex Cover to Hamiltonian Cycle construction. 
 
 Incident rows for the same original vertex are linked as `u6 -> next u1`, so the degree-2 precheck collapses most of each gadget before the remaining selector and cross edges are scored by the HC solver.
 
-On the 3-SAT tab and the tabs that pass through generated 3-SAT, the browser now scores SAT witness choices first. For `V` checked Boolean decision variables, that means `2V` logical witness choices. Each choice is represented by a paired HC diagonal decision; either valid diagonal commits the same VC consequence, then the gadget propagation forces the paired chain. After the relevant original decision variables are committed, the tab checks the inferred original witness instead of spending time scoring unrelated HC completion edges. Set Cover and X3C check selected set variables, Graph Coloring checks vertex-color choices, Sudoku checks placement choices, and Packing checks candidate placement choices.
+On the 3-SAT tab and the tabs that pass through generated 3-SAT, the browser now scores SAT witness choices first. For `V` checked Boolean decision variables, that means `2V` logical witness choices. Each choice is represented by a paired HC diagonal decision; either valid diagonal commits the same VC consequence, then the gadget propagation forces the paired chain. After the relevant original decision variables are committed, the tab checks the inferred original witness instead of spending time scoring unrelated HC completion edges. Set Cover and X3C check selected set variables, Graph Coloring checks vertex-color choices, and Packing checks candidate placement choices.
 
 The direct Vertex Cover tab now uses the same witness-choice pattern. For `n` original vertices, it scores `2n` logical choices: `cover(v)` and `not cover(v)`. Clique and Independent Set inherit this through their Vertex Cover reductions. After all original vertices are committed or forced, the app validates the original cover, clique, or independent set witness instead of scoring unrelated HC completion edges.
 
@@ -302,39 +301,6 @@ Example 4-colorable instance:
 ```
 
 That second graph is `K4`: it is not 3-colorable, but it is 4-colorable. The 3-SAT encoding uses `colors * vertices` base variables, one at-least-one-color clause per vertex, pairwise not-both color clauses per vertex, and one conflict clause per edge per color before 3-literal normalization.
-
-## Sudoku tool
-
-The Sudoku tab is visual. Choose the square box size, then build the grid:
-
-```text
-box size = 3
-grid size = 9 x 9
-```
-
-Other supported visual sizes:
-
-```text
-2 x 2 boxes -> 4 x 4 Sudoku
-3 x 3 boxes -> 9 x 9 Sudoku
-4 x 4 boxes -> 16 x 16 Sudoku
-5 x 5 boxes -> 25 x 25 Sudoku
-```
-
-The app uses numeric values. For 16x16, users type `10` through `16` directly. For 25x25, users type `10` through `25` directly.
-
-The app uses the exact placement model:
-
-```text
-one variable = row r, column c, digit d
-each cell has exactly one digit
-each row has each digit once
-each column has each digit once
-each box has each digit once
-Sudoku -> exact cover style 3-SAT -> Vertex Cover clause triangles -> direct Hamiltonian Cycle
-```
-
-For 4x4, 9x9, and 16x16, the exact reduction size is posted, and the degree-2 forced-edge precheck is posted when the HC graph is small enough to materialize. For 25x25, the app counts the exact 3-SAT and estimated Vertex-Cover-to-HC size without materializing every clause and edge, because the full graph is too large for browser memory. Sudoku only displays a filled visual witness after the HC solver returns YES for a materialized reduced graph.
 
 ## 3D Packing tool
 

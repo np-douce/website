@@ -6058,10 +6058,12 @@ function runSafely(fn) {
 
 document.querySelectorAll(".tab").forEach(button => {
   button.addEventListener("click", () => {
+    const panel = document.getElementById(button.dataset.panel);
+    if (!panel) return;
     document.querySelectorAll(".tab").forEach(tab => tab.classList.remove("active"));
     document.querySelectorAll(".panel").forEach(panel => panel.classList.remove("active"));
     button.classList.add("active");
-    document.getElementById(button.dataset.panel).classList.add("active");
+    panel.classList.add("active");
   });
 });
 
@@ -6073,19 +6075,21 @@ document.getElementById("runIs").addEventListener("click", () => runSafely(() =>
 document.getElementById("runSetCover").addEventListener("click", () => runSafely(() => runSetCover(document.getElementById("setCoverInput").value)));
 document.getElementById("runX3c").addEventListener("click", () => runSafely(() => runX3c(document.getElementById("x3cInput").value)));
 document.getElementById("runGraphColoring").addEventListener("click", () => runSafely(() => runGraphColoring(document.getElementById("graphColoringInput").value)));
-document.getElementById("buildSudokuGrid").addEventListener("click", () => runSafely(() => {
-  buildSudokuGrid();
-  return "Sudoku grid rebuilt.";
-}));
-document.getElementById("loadSudokuExample").addEventListener("click", () => runSafely(() => {
-  loadSudokuExample();
-  return "Loaded the 9x9 Sudoku example.";
-}));
-document.getElementById("clearSudokuGrid").addEventListener("click", () => runSafely(() => {
-  clearSudokuGrid();
-  return "Sudoku grid cleared.";
-}));
-document.getElementById("runSudoku").addEventListener("click", () => runSafely(() => runSudoku()));
+if (document.getElementById("sudokuGrid")) {
+  document.getElementById("buildSudokuGrid").addEventListener("click", () => runSafely(() => {
+    buildSudokuGrid();
+    return "Sudoku grid rebuilt.";
+  }));
+  document.getElementById("loadSudokuExample").addEventListener("click", () => runSafely(() => {
+    loadSudokuExample();
+    return "Loaded the 9x9 example.";
+  }));
+  document.getElementById("clearSudokuGrid").addEventListener("click", () => runSafely(() => {
+    clearSudokuGrid();
+    return "Sudoku grid cleared.";
+  }));
+  document.getElementById("runSudoku").addEventListener("click", () => runSafely(() => runSudoku()));
+}
 document.getElementById("addBoxType").addEventListener("click", () => addPackingBoxRow());
 document.getElementById("packingBoxRows").addEventListener("click", event => {
   if (!event.target.classList.contains("removeBoxType")) return;
@@ -6158,5 +6162,5 @@ document.getElementById("matrixFile").addEventListener("change", event => loadFi
 document.getElementById("pointsFile").addEventListener("change", event => loadFileInto(event.target, "pointsInput"));
 document.getElementById("manualFile").addEventListener("change", event => loadFileInto(event.target, "manualInput"));
 
-loadSudokuExample();
+if (document.getElementById("sudokuGrid")) loadSudokuExample();
 drawPackingScene({ l: 20, w: 8, h: 8 }, []);
