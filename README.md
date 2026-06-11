@@ -13,7 +13,6 @@ The app is static: it uses only local HTML, CSS, and JavaScript. No server is re
 - Set Cover to 3-SAT to Vertex Cover to direct Hamiltonian-cycle reduction
 - X3C to 3-SAT to Vertex Cover to direct Hamiltonian-cycle reduction
 - Graph Coloring to 3-SAT to Vertex Cover to direct Hamiltonian-cycle reduction
-- 3D truck/container packing with candidate-placement 3-SAT to Vertex Cover to HC
 - Hamiltonian pairs input
 - TSP matrix input
 - TSP Euclidean points input
@@ -31,7 +30,11 @@ Reduction tabs now use this strict flow for their displayed answer:
 original problem -> reduction -> HC graph -> NP-douce HC solver -> inferred original answer
 ```
 
-When the HC solver returns YES, reduction tabs print concrete original-problem witnesses, such as SAT assignments, vertex covers, cliques, independent sets, selected sets, colorings, or packing placement summaries. The displayed witness count is capped by `HC backtrack tries`. Raw HC and TSP-style tabs also print the best tour order, not just the tour weight. The app screen is compacted to the final answer, witness lines, node counts, key run settings, and elapsed time instead of the full solver trace. Verbose preambles, hidden edge/formula manifests, and duplicate display-only prechecks are skipped so compact runs do less formatting work.
+When the HC solver returns YES, reduction tabs print concrete original-problem witnesses, such as SAT assignments, vertex covers, cliques, independent sets, selected sets, or colorings. The displayed witness count is capped by `HC backtrack tries`. Raw HC and TSP-style tabs also print the best tour order, not just the tour weight. The app screen is compacted to the final answer, witness lines, node counts, key run settings, and elapsed time instead of the full solver trace. Verbose preambles, hidden edge/formula manifests, and duplicate display-only prechecks are skipped so compact runs do less formatting work.
+
+The raw Hamiltonian Pairs tab keeps scoring restricted to real `-1` HC edges. Before scoring, it applies only necessary HC facts: every vertex must have at least two usable HC edges, the usable graph must be connected, and the usable graph cannot have a bridge or articulation point. Degree-2 vertices are forced before the score search. Backtracking skips raw HC branches that collapse to the same forced-edge state.
+
+The TSP Points tab keeps the same score-guided method, then applies the Euclidean no-crossing fact to remove crossing edges from a completed points tour. Matrix and manual TSP inputs are not given Euclidean crossing rules.
 
 If the reduced HC graph is above the app's `HC solve node limit`, the tab reports `NOT COMPUTED` instead of using a separate direct solver. Raise the limit when you want to force a larger reduced HC instance through the solver, but large values can run very slowly.
 
@@ -105,7 +108,7 @@ The app uses the direct classic Vertex Cover to Hamiltonian Cycle construction. 
 
 Incident rows for the same original vertex are linked as `u6 -> next u1`, so the degree-2 precheck collapses most of each gadget before the remaining selector and cross edges are scored by the HC solver.
 
-On the 3-SAT tab and the tabs that pass through generated 3-SAT, the browser now scores SAT witness choices first. For `V` checked Boolean decision variables, that means `2V` logical witness choices. Each choice is represented by a paired HC diagonal decision; either valid diagonal commits the same VC consequence, then the gadget propagation forces the paired chain. After the relevant original decision variables are committed, the tab checks the inferred original witness instead of spending time scoring unrelated HC completion edges. Set Cover and X3C check selected set variables, Graph Coloring checks vertex-color choices, and Packing checks candidate placement choices.
+On the 3-SAT tab and the tabs that pass through generated 3-SAT, the browser now scores SAT witness choices first. For `V` checked Boolean decision variables, that means `2V` logical witness choices. Each choice is represented by a paired HC diagonal decision; either valid diagonal commits the same VC consequence, then the gadget propagation forces the paired chain. After the relevant original decision variables are committed, the tab checks the inferred original witness instead of spending time scoring unrelated HC completion edges. Set Cover and X3C check selected set variables, and Graph Coloring checks vertex-color choices.
 
 The direct Vertex Cover tab now uses the same witness-choice pattern. For `n` original vertices, it scores `2n` logical choices: `cover(v)` and `not cover(v)`. Clique and Independent Set inherit this through their Vertex Cover reductions. After all original vertices are committed or forced, the app validates the original cover, clique, or independent set witness instead of scoring unrelated HC completion edges.
 
@@ -301,31 +304,3 @@ Example 4-colorable instance:
 ```
 
 That second graph is `K4`: it is not 3-colorable, but it is 4-colorable. The 3-SAT encoding uses `colors * vertices` base variables, one at-least-one-color clause per vertex, pairwise not-both color clauses per vertex, and one conflict clause per edge per color before 3-literal normalization.
-
-## 3D Packing tool
-
-The 3D packing tab asks for truck length, width, height, max weight, max packing options sent to HC, rotation settings, and box rows with:
-
-```text
-name length width height weight quantity stackable fragile max_top_weight
-```
-
-Example values already load in the form:
-
-```text
-Truck: 20 x 8 x 8, max weight 4000
-A: 5 x 4 x 3, weight 120, quantity 4, stackable
-B: 4 x 3 x 2, weight 70, quantity 8, stackable
-C: 3 x 2 x 2, weight 40, quantity 10, fragile
-```
-
-The app first builds a practical extreme-point packing and draws it in the canvas. Then it creates a low-node candidate-placement decision model:
-
-```text
-one variable = one box at one generated position and orientation
-one box chooses one candidate
-overlapping candidates cannot both be chosen
-candidate-placement 3-SAT -> Vertex Cover clause triangles -> direct Hamiltonian Cycle
-```
-
-The Hamiltonian-cycle side uses the same classic 3-SAT-to-Vertex-Cover bridge and degree-2 forced-edge precheck as the other SAT-based NP-complete tools. Raise max packing options sent to HC when you want broader HC search space; lower it when you want fewer nodes and faster runs.

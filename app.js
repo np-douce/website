@@ -89,6 +89,72 @@ function attachEdgeListAdjacency(edgeList, n) {
   return edgeList;
 }
 
+function hamiltonianNecessaryGraphCheck(edge, n) {
+  if (n < 3) return { ok: true, reason: "" };
+  const adjacency = Array.from({ length: n + 1 }, () => []);
+  for (let i = 1; i < n; i++) {
+    for (let j = i + 1; j <= n; j++) {
+      if (edge[i][j] === 0) continue;
+      adjacency[i].push(j);
+      adjacency[j].push(i);
+    }
+  }
+
+  for (let vertex = 1; vertex <= n; vertex++) {
+    if (adjacency[vertex].length < 2) {
+      return { ok: false, reason: `vertex ${vertex} has only ${adjacency[vertex].length} usable HC edges` };
+    }
+  }
+
+  const seen = Array(n + 1).fill(false);
+  const stack = [1];
+  seen[1] = true;
+  while (stack.length > 0) {
+    const vertex = stack.pop();
+    for (const neighbor of adjacency[vertex]) {
+      if (seen[neighbor]) continue;
+      seen[neighbor] = true;
+      stack.push(neighbor);
+    }
+  }
+  for (let vertex = 1; vertex <= n; vertex++) {
+    if (!seen[vertex]) return { ok: false, reason: `the usable HC graph is disconnected at vertex ${vertex}` };
+  }
+
+  const discovery = Array(n + 1).fill(0);
+  const low = Array(n + 1).fill(0);
+  let time = 0;
+  let bridge = null;
+  let articulation = 0;
+
+  const dfs = (vertex, parent) => {
+    discovery[vertex] = low[vertex] = ++time;
+    let childCount = 0;
+    for (const neighbor of adjacency[vertex]) {
+      if (neighbor === parent) continue;
+      if (!discovery[neighbor]) {
+        childCount += 1;
+        dfs(neighbor, vertex);
+        low[vertex] = Math.min(low[vertex], low[neighbor]);
+        if (!bridge && low[neighbor] > discovery[vertex]) {
+          bridge = [vertex, neighbor];
+        }
+        if (!articulation &&
+            ((parent === 0 && childCount > 1) || (parent !== 0 && low[neighbor] >= discovery[vertex]))) {
+          articulation = vertex;
+        }
+      } else {
+        low[vertex] = Math.min(low[vertex], discovery[neighbor]);
+      }
+    }
+  };
+
+  dfs(1, 0);
+  if (bridge) return { ok: false, reason: `usable HC edge ${bridge[0]}-${bridge[1]} is a bridge` };
+  if (articulation) return { ok: false, reason: `vertex ${articulation} is an articulation point in the usable HC graph` };
+  return { ok: true, reason: "" };
+}
+
 function numericEdgeKey(from, to, stride) {
   return from < to ? (from * stride) + to : (to * stride) + from;
 }
@@ -863,6 +929,54 @@ function cycleCost(order, edge) {
   return total;
 }
 
+function orientation(a, b, c) {
+  const value = ((b.x - a.x) * (c.y - a.y)) - ((b.y - a.y) * (c.x - a.x));
+  if (Math.abs(value) < 1e-12) return 0;
+  return value > 0 ? 1 : -1;
+}
+
+function euclideanSegmentsCross(a, b, c, d) {
+  const abC = orientation(a, b, c);
+  const abD = orientation(a, b, d);
+  const cdA = orientation(c, d, a);
+  const cdB = orientation(c, d, b);
+  return abC !== 0 && abD !== 0 && cdA !== 0 && cdB !== 0 && abC !== abD && cdA !== cdB;
+}
+
+function uncrossEuclideanTour(order, edge, points) {
+  const next = order.slice();
+  const n = next.length;
+  let improvements = 0;
+  let passes = 0;
+  let improved = true;
+
+  while (improved && passes < n * n) {
+    improved = false;
+    passes += 1;
+    for (let i = 0; i < n - 1 && !improved; i++) {
+      const aIndex = next[i];
+      const bIndex = next[(i + 1) % n];
+      for (let j = i + 2; j < n; j++) {
+        if (i === 0 && j === n - 1) continue;
+        const cIndex = next[j];
+        const dIndex = next[(j + 1) % n];
+        if (!euclideanSegmentsCross(points[aIndex - 1], points[bIndex - 1], points[cIndex - 1], points[dIndex - 1])) continue;
+        reverseOrderSegment(next, i + 1, j);
+        improvements += 1;
+        improved = true;
+        break;
+      }
+    }
+  }
+
+  return {
+    order: next,
+    improvements,
+    passes,
+    totalTourCost: cycleCost(next, edge)
+  };
+}
+
 function reverseOrderSegment(order, left, right) {
   while (left < right) {
     const saved = order[left];
@@ -1216,6 +1330,17 @@ function finishTourFromState(edge, n, endpointLink, state, options) {
   const forced = findForcedFinalEdge(n, endpointLink, edge);
   let totalTourCost = state.chosenEdgeTotal;
   if (forced.exists) {
+    if (options.requireNonzeroFinalEdge && forced.weight === 0) {
+      append(lines, "Final forced edge is a zero-weight non-edge, so this HC branch is not a complete HC tour.");
+      return {
+        lines: lines || [],
+        totalTourCost: NaN,
+        partialTourCost: state.chosenEdgeTotal,
+        hamiltonianFound: false,
+        chosenEdges: state.chosenEdges ? state.chosenEdges.slice() : [],
+        tourOrder: null
+      };
+    }
     append(lines, `The biggest probability is 1 at Edge[${forced.from}][${forced.to}].`);
     totalTourCost += forced.weight;
     if (state.chosenEdges) state.chosenEdges.push({ from: forced.from, to: forced.to, weight: forced.weight });
@@ -1223,6 +1348,17 @@ function finishTourFromState(edge, n, endpointLink, state, options) {
   let chosenEdges = state.chosenEdges ? state.chosenEdges.slice() : [];
   let builtTour = chosenEdges.length > 0 ? selectedEdgesToTourOrder(chosenEdges, n) : { valid: false };
   let tourOrder = builtTour.valid ? builtTour.order.slice() : null;
+
+  if (options.removeEuclideanCrossings && options.euclideanPoints && tourOrder) {
+    const uncrossed = uncrossEuclideanTour(tourOrder, edge, options.euclideanPoints);
+    if (uncrossed.improvements > 0) {
+      append(lines, "Euclidean no-crossing cleanup:");
+      append(lines, `crossing removals = ${uncrossed.improvements}`);
+      totalTourCost = uncrossed.totalTourCost;
+      tourOrder = uncrossed.order.slice();
+      chosenEdges = tourOrderToEdges(tourOrder, edge);
+    }
+  }
 
   const repairPasses = Math.max(0, Math.floor(Number(options.repairPasses || 0)));
   if (repairPasses > 0) {
@@ -1420,12 +1556,28 @@ function prepareBacktrackBranch(edge, n, branch, alternativeInfo, searchOptions)
   };
 }
 
+function trackingStateSignature(endpointLink, state) {
+  const chosenTotal = Number.isFinite(state.chosenEdgeTotal) ? formatNumber(state.chosenEdgeTotal) : String(state.chosenEdgeTotal);
+  return `${endpointLink.join(",")}|used:${state.usedVertices}|chains:${state.closedChains}|cost:${chosenTotal}`;
+}
+
 function buildBacktrackBranches(ranked, maxAlternatives, branch, edge, n, searchOptions) {
   const defaultAlternatives = selectSmartBacktrackAlternatives(ranked, maxAlternatives, searchOptions);
   if (!searchOptions.vertexCoverPropagation) {
-    return defaultAlternatives
-      .map(alternativeInfo => prepareBacktrackBranch(edge, n, branch, alternativeInfo, searchOptions))
-      .filter(Boolean);
+    const branches = [];
+    const seenStates = new Set();
+    const bestPreview = prepareBacktrackBranch(edge, n, branch, { candidate: ranked[0], optionIndex: 0, regret: 0 }, searchOptions);
+    if (bestPreview) seenStates.add(trackingStateSignature(bestPreview.endpointLink, bestPreview.state));
+    for (const alternativeInfo of defaultAlternatives) {
+      if (branches.length >= maxAlternatives) break;
+      const prepared = prepareBacktrackBranch(edge, n, branch, alternativeInfo, searchOptions);
+      if (!prepared) continue;
+      const signature = trackingStateSignature(prepared.endpointLink, prepared.state);
+      if (seenStates.has(signature)) continue;
+      seenStates.add(signature);
+      branches.push(prepared);
+    }
+    return branches;
   }
 
   const best = ranked[0];
@@ -1899,6 +2051,24 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
   options.momentEdgeList = momentEdgeList;
   options.candidateEdgeList = candidateEdgeList;
   const edgeSquared = null;
+  if (options.hcNecessaryPrecheck) {
+    const necessary = hamiltonianNecessaryGraphCheck(edge, n);
+    if (!necessary.ok) {
+      append(lines, `HC necessary precheck failed: ${necessary.reason}.`);
+      return {
+        text: lines ? lines.join("\n") : "",
+        totalTourCost: NaN,
+        partialTourCost: NaN,
+        hamiltonianFound: false,
+        chosenEdges: [],
+        tourOrder: null,
+        bestFinals: [],
+        precheckReason: necessary.reason,
+        moments: null
+      };
+    }
+    append(lines, "HC necessary precheck passed.");
+  }
   const moments = computeTheoryMomentsFromEdgeList(momentEdgeList, n);
   const suggestedBeta = 1.0 / Math.sqrt(Math.max(Number.MIN_VALUE, moments.tourVariance));
   const effectiveBeta = Number.isFinite(beta) ? beta : suggestedBeta;
@@ -2040,6 +2210,7 @@ function runTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
   append(lines, `HC nodes = ${n}`);
   append(lines, `HC backtrack tries = ${Math.max(0, Math.floor(Number(options.backtrackLimit || 0)))}`);
   if (options.stopAtFirstHamiltonian) append(lines, "HC tour search mode = stop at first HC tour");
+  if (result.precheckReason) append(lines, `HC necessary precheck failed = ${result.precheckReason}`);
   if (Number.isFinite(result.totalTourCost)) append(lines, `${isTspStyle ? "best tour cost" : "HC tour cost"} = ${formatNumber(result.totalTourCost)}`);
   if (Number.isFinite(result.partialTourCost) && !Number.isFinite(result.totalTourCost)) append(lines, `${isTspStyle ? "best partial tour cost" : "HC best partial tour cost"} = ${formatNumber(result.partialTourCost)}`);
   appendTrackingTourWitnesses(lines, result, options.tourKind || "hc");
@@ -2224,7 +2395,7 @@ function parsePoints(text) {
       edge[j][i] = edge[i][j];
     }
   }
-  return { edge, n };
+  return { edge, n, points };
 }
 
 function literalIsTrue(literal, assignment) {
@@ -6090,22 +6261,26 @@ if (document.getElementById("sudokuGrid")) {
   }));
   document.getElementById("runSudoku").addEventListener("click", () => runSafely(() => runSudoku()));
 }
-document.getElementById("addBoxType").addEventListener("click", () => addPackingBoxRow());
-document.getElementById("packingBoxRows").addEventListener("click", event => {
-  if (!event.target.classList.contains("removeBoxType")) return;
-  const rows = document.querySelectorAll("#packingBoxRows .boxRow");
-  if (rows.length <= 1) {
-    write("Keep at least one box type.");
-    return;
-  }
-  event.target.closest(".boxRow").remove();
-});
-document.getElementById("runPacking3d").addEventListener("click", () => runSafely(() => runPacking3d()));
+if (document.getElementById("packingCanvas")) {
+  document.getElementById("addBoxType").addEventListener("click", () => addPackingBoxRow());
+  document.getElementById("packingBoxRows").addEventListener("click", event => {
+    if (!event.target.classList.contains("removeBoxType")) return;
+    const rows = document.querySelectorAll("#packingBoxRows .boxRow");
+    if (rows.length <= 1) {
+      write("Keep at least one box type.");
+      return;
+    }
+    event.target.closest(".boxRow").remove();
+  });
+  document.getElementById("runPacking3d").addEventListener("click", () => runSafely(() => runPacking3d()));
+}
 document.getElementById("runPairs").addEventListener("click", () => runSafely(() => {
   const { edge, n } = parsePairs(document.getElementById("pairsInput").value);
   return runTrackingSolver(edge, n, NaN, "browser pairs input", {
+    hcNecessaryPrecheck: true,
     forceDegreeTwo: true,
-    completeWithNeutralEdges: true,
+    completeWithNeutralEdges: false,
+    requireNonzeroFinalEdge: true,
     repairPasses: getHcRepairPasses(),
     backtrackLimit: getHcBacktrackTries(),
     stopAtFirstHamiltonian: shouldStopAtFirstHcTour(),
@@ -6127,9 +6302,11 @@ document.getElementById("runMatrix").addEventListener("click", () => runSafely((
   });
 }));
 document.getElementById("runPoints").addEventListener("click", () => runSafely(() => {
-  const { edge, n } = parsePoints(document.getElementById("pointsInput").value);
+  const { edge, n, points } = parsePoints(document.getElementById("pointsInput").value);
   return runTrackingSolver(edge, n, NaN, "browser points input", {
     scoreZeroEdges: true,
+    euclideanPoints: points,
+    removeEuclideanCrossings: true,
     repairPasses: getHcRepairPasses(),
     backtrackLimit: getHcBacktrackTries(),
     tourKind: "tsp",
@@ -6163,4 +6340,4 @@ document.getElementById("pointsFile").addEventListener("change", event => loadFi
 document.getElementById("manualFile").addEventListener("change", event => loadFileInto(event.target, "manualInput"));
 
 if (document.getElementById("sudokuGrid")) loadSudokuExample();
-drawPackingScene({ l: 20, w: 8, h: 8 }, []);
+if (document.getElementById("packingCanvas")) drawPackingScene({ l: 20, w: 8, h: 8 }, []);

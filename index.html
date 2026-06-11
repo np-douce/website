@@ -29,7 +29,6 @@
           <button class="tab" data-panel="setCover">Set cover</button>
           <button class="tab" data-panel="x3c">X3C</button>
           <button class="tab" data-panel="graphColoring">Graph coloring</button>
-          <button class="tab" data-panel="packing3d">3D packing</button>
         </div>
         <div class="tabGroup">
           <span class="tabGroupLabel">Direct HC</span>
@@ -161,88 +160,6 @@
           <label class="fileButton">Load text file<input type="file" id="graphColoringFile" accept=".txt"></label>
           <button id="runGraphColoring">Run graph coloring reduction</button>
         </div>
-      </section>
-
-      <section id="packing3d" class="panel widePanel">
-        <div class="panelHead">
-          <h2>3D Packing to Hamiltonian Cycle</h2>
-          <p>Builds a practical truck load, draws a 3D view, then creates a candidate-placement 3-SAT reduction that flows through Vertex Cover into the HC solver.</p>
-        </div>
-
-        <div class="formGrid">
-          <label>Truck length<input id="truckLength" type="number" min="1" step="any" value="20"></label>
-          <label>Truck width<input id="truckWidth" type="number" min="1" step="any" value="8"></label>
-          <label>Truck height<input id="truckHeight" type="number" min="1" step="any" value="8"></label>
-          <label>Max weight<input id="truckMaxWeight" type="number" min="0" step="any" value="4000"></label>
-          <label>Max packing options sent to HC<input id="packingCandidateBudget" type="number" min="1" step="1" value="29"></label>
-          <label class="checkLine"><input id="packingAllowRotate" type="checkbox" checked> Allow rotation</label>
-          <label class="checkLine"><input id="packingKeepUpright" type="checkbox" checked> Keep height upright</label>
-        </div>
-        <p class="fieldNote">Higher packing options send more possibilities into the Hamiltonian-cycle graph, which creates more nodes and runs slower.</p>
-
-        <div class="tableWrap">
-          <table class="boxTable">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>L</th>
-                <th>W</th>
-                <th>H</th>
-                <th>Weight</th>
-                <th>Qty</th>
-                <th>Stackable</th>
-                <th>Fragile</th>
-                <th>Max top weight</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="packingBoxRows">
-              <tr class="boxRow">
-                <td><input class="boxName" value="A"></td>
-                <td><input class="boxL" type="number" min="1" step="any" value="5"></td>
-                <td><input class="boxW" type="number" min="1" step="any" value="4"></td>
-                <td><input class="boxH" type="number" min="1" step="any" value="3"></td>
-                <td><input class="boxWeight" type="number" min="0" step="any" value="120"></td>
-                <td><input class="boxQty" type="number" min="1" step="1" value="4"></td>
-                <td><input class="boxStackable" type="checkbox" checked></td>
-                <td><input class="boxFragile" type="checkbox"></td>
-                <td><input class="boxMaxTop" type="number" min="0" step="any" value="600"></td>
-                <td><button class="removeBoxType" type="button" title="Remove">X</button></td>
-              </tr>
-              <tr class="boxRow">
-                <td><input class="boxName" value="B"></td>
-                <td><input class="boxL" type="number" min="1" step="any" value="4"></td>
-                <td><input class="boxW" type="number" min="1" step="any" value="3"></td>
-                <td><input class="boxH" type="number" min="1" step="any" value="2"></td>
-                <td><input class="boxWeight" type="number" min="0" step="any" value="70"></td>
-                <td><input class="boxQty" type="number" min="1" step="1" value="8"></td>
-                <td><input class="boxStackable" type="checkbox" checked></td>
-                <td><input class="boxFragile" type="checkbox"></td>
-                <td><input class="boxMaxTop" type="number" min="0" step="any" value="400"></td>
-                <td><button class="removeBoxType" type="button" title="Remove">X</button></td>
-              </tr>
-              <tr class="boxRow">
-                <td><input class="boxName" value="C"></td>
-                <td><input class="boxL" type="number" min="1" step="any" value="3"></td>
-                <td><input class="boxW" type="number" min="1" step="any" value="2"></td>
-                <td><input class="boxH" type="number" min="1" step="any" value="2"></td>
-                <td><input class="boxWeight" type="number" min="0" step="any" value="40"></td>
-                <td><input class="boxQty" type="number" min="1" step="1" value="10"></td>
-                <td><input class="boxStackable" type="checkbox" checked></td>
-                <td><input class="boxFragile" type="checkbox" checked></td>
-                <td><input class="boxMaxTop" type="number" min="0" step="any" value="0"></td>
-                <td><button class="removeBoxType" type="button" title="Remove">X</button></td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        <div class="controls">
-          <button id="addBoxType" type="button">Add box type</button>
-          <button id="runPacking3d" type="button">Run 3D packing</button>
-        </div>
-
-        <canvas id="packingCanvas" width="980" height="560" aria-label="3D packing view"></canvas>
       </section>
 
       <section id="pairs" class="panel">
