@@ -1,17 +1,16 @@
 # NP-Soft
 
-**NP-Soft** is an experimental research application for exploring combinatorial optimization problems using ideas from **statistical mechanics, exact combinatorial counting, and constrained solution spaces**.
+**NP-Soft** is an experimental research application for exploring combinatorial optimization problems using ideas from **statistical mechanics, exact combinatorial counting, and constrained solution ensembles**.
 
-The application is designed to study problems such as the **Traveling Salesman Problem (TSP)** and related Hamiltonian-cycle problems by analyzing the statistical properties of large sets of candidate solutions rather than enumerating every possible solution individually.
+The application is designed to study problems such as the **Traveling Salesman Problem (TSP)** and related Hamiltonian-cycle problems by analyzing the statistical properties of large sets of candidate tours.
 
 ## Live Demo
 
 A browser-based version of the application can be hosted with GitHub Pages.
 
 **Live App:**
-`https://YOUR-USERNAME.github.io/YOUR-REPOSITORY/`
 
-Replace the link above with the actual GitHub Pages address for this repository.
+https://np-douce.github.io/website/
 
 ---
 
@@ -19,21 +18,15 @@ Replace the link above with the actual GitHub Pages address for this repository.
 
 For a complete weighted graph
 
-[
-G=(V,E),
-]
+$$G = (V, E)$$
 
-with (n=|V|) vertices, NP-Soft considers the complete ensemble of Hamiltonian cycles.
+with $n = |V|$ vertices, NP-Soft considers the complete ensemble of Hamiltonian cycles.
 
 The number of distinct undirected Hamiltonian cycles is
 
-[
-\Omega_0=\frac{(n-1)!}{2}.
-]
+$$\Omega_0 = \frac{(n-1)!}{2}.$$ 
 
-Rather than generating all of these tours explicitly, the program computes aggregate properties of the Hamiltonian solution space.
-
-These include:
+Rather than generating all of these tours explicitly, the program computes aggregate properties of the Hamiltonian solution space. These include:
 
 * number of Hamiltonian states,
 * exact average tour weight,
@@ -47,79 +40,37 @@ These include:
 
 # Statistical-Mechanical Model
 
-Each Hamiltonian cycle (\tau) is treated as a microstate with energy equal to its tour weight,
+Each Hamiltonian cycle $\tau$ is treated as a microstate with energy equal to its tour weight,
 
-[
-H(\tau)=\sum_{e\in\tau}w_e.
-]
+$$H(\tau) = \sum_{e \in \tau} w_e.$$ 
 
 The associated partition function is
 
-[
-Z(\beta)
-========
+$$Z(\beta) = \sum_{\tau \in \mathcal{H}} e^{-\beta H(\tau)},$$
 
-\sum_{\tau\in\mathcal H}
- e^{-\beta H(\tau)},
-]
+where $\beta$ is an inverse-temperature parameter and $\mathcal{H}$ is the set of Hamiltonian cycles.
 
-where (\beta) is an inverse-temperature parameter and (\mathcal H) is the set of Hamiltonian cycles.
+At $\beta = 0$, all Hamiltonian cycles have equal statistical weight, giving
 
-At
-
-[
-\beta=0,
-]
-
-all Hamiltonian cycles have equal statistical weight, giving
-
-[
-Z(0)=\Omega_0
-=============
-
-\frac{(n-1)!}{2}.
-]
+$$Z(0) = \Omega_0 = \frac{(n-1)!}{2}.$$ 
 
 ---
 
 # Exact Mean Tour Weight
 
-Every edge in the complete graph (K_n) occurs in exactly
-
-[
-(n-2)!
-]
-
-Hamiltonian cycles.
+Every edge in the complete graph $K_n$ occurs in exactly $(n-2)!$ Hamiltonian cycles.
 
 If
 
-[
-W=\sum_{e\in E}w_e,
-]
+$$W = \sum_{e \in E} w_e,$$
 
 then the exact mean weight of all Hamiltonian cycles is
 
-[
-\boxed{
-\mu
-===
+$$\mu = \frac{2}{n-1} \sum_{e \in E} w_e = \frac{2W}{n-1}.$$ 
 
-\frac{2}{n-1}
-\sum_{e\in E}w_e
-}
-]
+Equivalently,
 
-or equivalently,
-
-[
-\boxed{
-H_{\mathrm{avg}}
-================
-
-\frac{2W}{n-1}.
-}
-]
+$$H_{\mathrm{avg}} = \frac{2W}{n-1}.$$ 
 
 This quantity can be computed directly from the graph without enumerating all Hamiltonian tours.
 
@@ -129,49 +80,19 @@ This quantity can be computed directly from the graph without enumerating all Ha
 
 The tour energy can be written using edge-indicator variables,
 
-[
-H(\tau)
-=======
-
-\sum_{e\in E}
-w_eX_e(\tau),
-]
+$$H(\tau) = \sum_{e \in E} w_e X_e(\tau),$$
 
 where
 
-[
-X_e(\tau)=
-\begin{cases}
-1, & e\in\tau,\\
-0, & e\notin\tau.
-\end{cases}
-]
+$$X_e(\tau) = \begin{cases} 1, & e \in \tau, \\ 0, & e \notin \tau. \end{cases}$$
 
 The variance of the Hamiltonian tour-weight distribution is
 
-[
-\boxed{
-\sigma^2
-========
+$$\sigma^2 = \langle H^2 \rangle - \mu^2,$$
 
-## \left\langle H^2\right\rangle
+and the standard deviation is
 
-\mu^2.
-}
-]
-
-The standard deviation is
-
-[
-\boxed{
-\sigma
-======
-
-\sqrt{
-\left\langle H^2\right\rangle-\mu^2
-}.
-}
-]
+$$\sigma = \sqrt{\langle H^2 \rangle - \mu^2}.$$ 
 
 The implementation evaluates the second moment using combinatorial classes of edge pairs rather than explicitly summing over every Hamiltonian cycle.
 
@@ -179,45 +100,13 @@ The implementation evaluates the second moment using combinatorial classes of ed
 
 # Partition-Function Approximation
 
-Expanding the logarithm of the partition function around (\beta=0) gives the cumulant expansion
+Expanding the logarithm of the partition function around $\beta = 0$ gives the cumulant expansion
 
-[
-\ln Z(\beta)
-============
+$$\ln Z(\beta) = \ln \Omega - \beta \kappa_1 + \frac{\beta^2}{2!} \kappa_2 - \frac{\beta^3}{3!} \kappa_3 + \cdots.$$ 
 
-\ln\Omega
--\beta\kappa_1
-+\frac{\beta^2}{2!}\kappa_2
--\frac{\beta^3}{3!}\kappa_3
-+\cdots.
-]
+Using $\kappa_1 = \mu$ and $\kappa_2 = \sigma^2$, NP-Soft uses the second-order approximation
 
-Using
-
-[
-\kappa_1=\mu
-]
-
-and
-
-[
-\kappa_2=\sigma^2,
-]
-
-NP-Soft uses the second-order approximation
-
-[
-\boxed{
-\ln Z(\beta)
-\approx
-\ln\Omega
----------
-
-\beta\mu
-+
-\frac{\beta^2\sigma^2}{2}.
-}
-]
+$$\ln Z(\beta) \approx \ln \Omega - \beta \mu + \frac{\beta^2 \sigma^2}{2}.$$ 
 
 This provides a compact statistical description of an otherwise extremely large Hamiltonian solution space.
 
@@ -229,112 +118,43 @@ NP-Soft can also calculate statistics after certain edges have already been chos
 
 Let
 
-[
-C={e_1,e_2,\ldots,e_k}
-]
+$$C = \{e_1, e_2, \ldots, e_k\}$$
 
-be the current set of constrained edges.
+be the current set of constrained edges. The corresponding Hamiltonian ensemble is
 
-The corresponding Hamiltonian ensemble is
-
-[
-\mathcal H_C
-============
-
-{\tau\in\mathcal H:
-C\subseteq\tau
-}.
-]
+$$\mathcal{H}_C = \{\tau \in \mathcal{H} : C \subseteq \tau\}.$$ 
 
 For compatible chosen-edge configurations, the state count used by the program is
 
-[
-\boxed{
-\Omega_C
-========
+$$\Omega_C = 2^{|C|-1} \left(n - 1 + |C| - |V_C|\right)!,$$
 
-2^{|C|-1}
-\left(
- n-1+|C|-|V_C|
-\right)!
-}
-]
-
-where:
-
-* (|C|) is the number of selected edges,
-* (|V_C|) is the number of vertices touched by those edges.
+where $|C|$ is the number of selected edges and $|V_C|$ is the number of vertices touched by those edges.
 
 The constrained statistical model then becomes
 
-[
-\boxed{
-\ln Z_C(\beta)
-\approx
-\ln\Omega_C
------------
-
-\beta\mu_C
-+\n\frac{\beta^2\sigma_C^2}{2}.
-}
-]
+$$\ln Z_C(\beta) \approx \ln \Omega_C - \beta \mu_C + \frac{\beta^2 \sigma_C^2}{2}.$$ 
 
 ---
 
 # Edge Importance
 
-For a candidate edge (e), NP-Soft compares two possible future solution spaces:
-
-1. tours where the edge is selected,
-2. tours where the edge is forbidden.
+For a candidate edge $e$, NP-Soft compares two possible future solution spaces: (1) tours where the edge is selected, and (2) tours where the edge is forbidden.
 
 The edge-importance score is
 
-[
-\boxed{
-I(e)
-====
-
-## \ln Z_{C+e}
-
-\ln Z_{C-e}.
-}
-]
+$$I(e) = \ln Z_{C+e} - \ln Z_{C-e}.$$ 
 
 Using the second-order approximation,
 
-[
-I(e)
-\approx
-\ln\left(
-\frac{\Omega_{C+e}}
-{\Omega_{C-e}}
-\right)
--------
+$$I(e) \approx \ln\left(\frac{\Omega_{C+e}}{\Omega_{C-e}}\right) - \beta \Delta \mu_e + \frac{\beta^2}{2} \Delta \sigma_e^2,$$
 
-\beta\Delta\mu_e
-+
-\frac{\beta^2}{2}
-\Delta\sigma_e^2.
-]
+where
 
-Here,
-
-[
-\Delta\mu_e
-===========
-
-\mu_{C+e}-\mu_{C-e},
-]
+$$\Delta \mu_e = \mu_{C+e} - \mu_{C-e},$$
 
 and
 
-[
-\Delta\sigma_e^2
-================
-
-\sigma_{C+e}^2-\sigma_{C-e}^2.
-]
+$$\Delta \sigma_e^2 = \sigma_{C+e}^2 - \sigma_{C-e}^2.$$ 
 
 The program can therefore evaluate candidate edges based not only on their individual weights, but also on how each decision changes the statistical properties of the remaining Hamiltonian solution space.
 
@@ -342,34 +162,15 @@ The program can therefore evaluate candidate edges based not only on their indiv
 
 # Tour Construction
 
-Starting from
+Starting from $C_0 = \varnothing$, the program evaluates admissible candidate edges and selects
 
-[
-C_0=\varnothing,
-]
-
-the program evaluates admissible candidate edges and selects
-
-[
-e_t^\ast
-========
-
-\operatorname*{arg,max}_{e}
-I_t(e).
-]
+$$e_t^* = \operatorname*{arg\,max}_e I_t(e).$$
 
 The chosen-edge set is then updated:
 
-[
-C_{t+1}
-=======
+$$C_{t+1} = C_t \cup \{ e_t^* \}.$$ 
 
-C_t\cup{e_t^\ast}.
-]
-
-This procedure is repeated while maintaining Hamiltonian feasibility constraints, including vertex degree restrictions and prevention of premature subtours.
-
-The process continues until the selected edges form a complete Hamiltonian cycle.
+This procedure is repeated while maintaining Hamiltonian feasibility constraints, including vertex degree restrictions and prevention of premature subtours. The process continues until the selected edges form a complete Hamiltonian cycle.
 
 ---
 
@@ -403,9 +204,7 @@ Hamiltonian Tour
 
 # Application
 
-The browser application provides an interactive implementation of the framework.
-
-Depending on the current version, the interface may allow users to:
+The browser application provides an interactive implementation of the framework. Depending on the current version, the interface may allow users to:
 
 * enter or load a graph,
 * provide coordinates or edge weights,
@@ -415,7 +214,7 @@ Depending on the current version, the interface may allow users to:
 * calculate candidate-edge scores,
 * observe the sequence of selected edges,
 * generate a final Hamiltonian tour,
-* experiment with different values of (\beta).
+* experiment with different values of $\beta$.
 
 ---
 
@@ -460,13 +259,7 @@ The exact structure may vary as the project develops.
 
 # Running the Browser Version
 
-The web version can be opened through GitHub Pages.
-
-If GitHub Pages is enabled for this repository, the application will normally be available at
-
-```text
-https://YOUR-USERNAME.github.io/YOUR-REPOSITORY/
-```
+The web version can be opened through GitHub Pages. If GitHub Pages is enabled for this repository, the application is normally available at the Live App URL above.
 
 For local testing, the files may also be served using a local HTTP server.
 
@@ -476,9 +269,7 @@ Because the application uses browser technologies such as JavaScript, caching, a
 
 # Offline Support
 
-The browser version may use a service worker to cache application resources.
-
-Once the required files have been cached, supported browsers may allow portions of the application to continue functioning without an active internet connection.
+The browser version may use a service worker to cache application resources. Once the required files have been cached, supported browsers may allow portions of the application to continue functioning without an active internet connection.
 
 Files commonly involved include
 
@@ -494,7 +285,7 @@ styles.css
 
 # Example Mathematical Output
 
-For a graph with (n) vertices, the application may report quantities such as
+For a graph with $n$ vertices, the application may report quantities such as
 
 ```text
 Number of vertices: n
@@ -528,25 +319,11 @@ The project is intended to explore whether useful global information about diffi
 
 In particular, NP-Soft investigates the relationship
 
-[
-\text{Combinatorics}
-\quad\longleftrightarrow\quad
-\text{Statistical Mechanics}
-\quad\longleftrightarrow\quad
-\text{Optimization}.
-]
+$$\text{Combinatorics} \quad\longleftrightarrow\quad \text{Statistical Mechanics} \quad\longleftrightarrow\quad \text{Optimization}.$$ 
 
 The central quantities are
 
-[
-\boxed{
-\Omega,\qquad
-\mu,\qquad
-\sigma^2,\qquad
-\ln Z,\qquad
-I(e).
-}
-]
+$$\boxed{\Omega,\qquad \mu,\qquad \sigma^2,\qquad \ln Z,\qquad I(e).}$$ 
 
 Together they provide a statistical representation of the Hamiltonian solution space and a mechanism for comparing candidate optimization decisions.
 
@@ -554,9 +331,7 @@ Together they provide a statistical representation of the Hamiltonian solution s
 
 # Citation
 
-If you use this project in academic work, please cite the associated paper or repository.
-
-A formal citation can be added here once the final publication information is available.
+If you use this project in academic work, please cite the associated paper or repository. A formal citation can be added here once the final publication information is available.
 
 ```bibtex
 @software{npsoft,
@@ -579,6 +354,4 @@ Independent research in combinatorial optimization, Hamiltonian problems, and st
 
 # Disclaimer
 
-This repository contains experimental research software.
-
-The implementation and numerical experiments are intended for research and educational purposes. Computational demonstrations should not be interpreted by themselves as formal proofs of complexity-theoretic results.
+This repository contains experimental research software. The implementation and numerical experiments are intended for research and educational purposes. Computational demonstrations should not be interpreted by themselves as formal proofs of complexity or mathematical claims.
