@@ -2,7 +2,21 @@
 
 **NP-Douce** is an experimental research application for exploring combinatorial optimization problems using ideas from **statistical mechanics, exact combinatorial counting, and constrained solution spaces**.
 
-The application is designed to study problems such as the **Traveling Salesman Problem (TSP)** and related Hamiltonian-cycle problems by analyzing the statistical properties of large sets of candidate solutions.
+The application is designed to study a broad class of **NP-complete problems** by reducing them to Hamiltonian cycle problems, then analyzing the statistical properties of the resulting solution spaces. By analyzing the statistical properties of large sets of candidate solutions, the software computes aggregate properties without explicitly enumerating all solutions.
+
+## Supported Problems
+
+NP-Douce can solve or analyze the following problem classes, all mapped to Hamiltonian cycle form:
+
+- **3-SAT** — Boolean satisfiability (classic reduction via vertex cover and Hamiltonian gadgets)
+- **Hamiltonian Cycle & TSP** — Direct Hamiltonian cycle detection and Traveling Salesman Problem
+- **Vertex Cover** — Find minimum set of vertices covering all edges
+- **Clique** — Locate maximum complete subgraphs
+- **Independent Set** — Find maximum set of non-adjacent vertices
+- **Set Cover** — Minimum collection of sets covering a universe
+- **Exact Cover (X3C)** — Partition universe into disjoint 3-element sets
+- **Graph Coloring** — Proper vertex coloring with minimum colors
+- **Hamiltonian Pairs** — Direct edge-pair specification
 
 ## Live Demo
 
@@ -36,7 +50,7 @@ Rather than generating all of these tours explicitly, the program computes aggre
 * candidate-edge importance scores,
 * iterative construction of a Hamiltonian tour.
 
-**Note:** While this framework focuses on Hamiltonian cycles and the TSP, the underlying methodology extends beyond these specific problems. Through polynomial-time reductions, the statistical data and combinatorial counting techniques can be applied theoretically to all NP-complete problems, enabling computation of exact ensemble statistics for a broad class of computationally hard problems.
+**Note:** While this framework focuses on Hamiltonian cycles and the TSP, the underlying methodology extends beyond these specific problems. Through polynomial-time reductions, the statistical framework applies to any NP-complete problem that can be embedded as a Hamiltonian cycle constraint.
 
 ---
 
@@ -116,25 +130,25 @@ This provides a compact statistical description of an otherwise extremely large 
 
 # Constrained Hamiltonian Ensembles
 
-NP-Douce can also calculate statistics after certain edges have already been chosen.
+NP-Douce can also calculate statistics after certain edges have already been chosen, and after forbidding certain macrostates.
 
-Let
-
-$$C = \{e_1, e_2, \ldots, e_k\}$$
-
-be the current set of constrained edges. The corresponding Hamiltonian ensemble is
+Let $C = \{e_1, e_2, \ldots, e_k\}$ be the current set of constrained edges (forced to be in the tour). The corresponding Hamiltonian ensemble is
 
 $$\mathcal{H}_C = \{\tau \in \mathcal{H} : C \subseteq \tau\}.$$ 
 
-For compatible chosen-edge configurations, the state count used by the program is
+Similarly, let $F = \{e_{f_1}, e_{f_2}, \ldots\}$ be the set of forbidden edges (forced to be excluded). The feasible ensemble is then
 
-$$\Omega_C = 2^{|C|-1} \left(n - 1 + |C| - |V_C|\right)!,$$
+$$\mathcal{H}_{C,F} = \{\tau \in \mathcal{H} : C \subseteq \tau \text{ and } F \cap \tau = \emptyset\}.$$ 
+
+For compatible configurations, the state count is
+
+$$\Omega_{C,F} = 2^{|C|-1} \left(n - 1 + |C| - |V_C|\right)!,$$
 
 where $|C|$ is the number of selected edges and $|V_C|$ is the number of vertices touched by those edges.
 
 The constrained statistical model then becomes
 
-$$\ln Z_C(\beta) \approx \ln \Omega_C - \beta \mu_C + \frac{\beta^2 \sigma_C^2}{2}.$$ 
+$$\ln Z_{C,F}(\beta) \approx \ln \Omega_{C,F} - \beta \mu_{C,F} + \frac{\beta^2 \sigma_{C,F}^2}{2}.$$ 
 
 ---
 
@@ -172,7 +186,7 @@ The chosen-edge set is then updated:
 
 $$C_{t+1} = C_t \cup \{ e_t^* \}.$$ 
 
-This procedure is repeated while maintaining Hamiltonian feasibility constraints, including vertex degree restrictions and prevention of premature subtours. The process continues until the selected edges form a complete Hamiltonian tour.
+This procedure is repeated while maintaining Hamiltonian feasibility constraints, including vertex degree restrictions and prevention of premature subtours. The process continues until the selected edges form a complete Hamiltonian cycle.
 
 ---
 
@@ -181,7 +195,10 @@ This procedure is repeated while maintaining Hamiltonian feasibility constraints
 The overall framework can be summarized as
 
 ```text
-Weighted Graph
+NP-Complete Problem
+      |
+      v
+Polynomial-Time Reduction to Hamiltonian Cycle
       |
       v
 Exact Combinatorial Counting
@@ -199,24 +216,24 @@ Candidate Edge Importance
 Iterative Edge Selection
       |
       v
-Hamiltonian Tour
+Hamiltonian Tour (Solution)
 ```
 
 ---
 
 # Application
 
-The browser application provides an interactive implementation of the framework. Depending on the current version, the interface may allow users to:
+The browser application provides an interactive implementation of the framework. The interface allows users to:
 
-* enter or load a graph,
-* provide coordinates or edge weights,
+* select a problem class (3-SAT, vertex cover, clique, independent set, set cover, X3C, graph coloring, or direct TSP/Hamiltonian),
+* enter or load problem-specific data,
+* configure solver parameters (node limits, backtracking, global search options),
 * calculate Hamiltonian ensemble statistics,
-* inspect average tour weights,
-* inspect standard deviations,
-* calculate candidate-edge scores,
+* inspect average tour weights and standard deviations,
+* calculate candidate-edge importance scores,
 * observe the sequence of selected edges,
-* generate a final Hamiltonian tour,
-* experiment with different values of $\beta$.
+* generate a final Hamiltonian tour solution,
+* experiment with different values of inverse temperature $\beta$.
 
 ---
 
@@ -240,17 +257,14 @@ NP-Douce/
 ├── index.html
 ├── app.js
 ├── styles.css
-├── manifest.json
+├── manifest.webmanifest
 ├── sw.js
 │
-├── src/
-│   └── algorithm source files
+├── *_input.txt
+│   └── example input files for various problems
 │
-├── examples/
-│   └── sample graph instances
-│
-├── results/
-│   └── example outputs
+├── CODE_OF_CONDUCT.md
+├── CONTRIBUTING.md
 │
 └── README.md
 ```
@@ -265,18 +279,18 @@ The web version can be opened through GitHub Pages. If GitHub Pages is enabled f
 
 For local testing, the files may also be served using a local HTTP server.
 
-Because the application uses browser technologies such as JavaScript, caching, and potentially service workers, behavior may differ slightly between a local environment and GitHub Pages.
+Because the application uses browser technologies such as JavaScript, caching, and service workers, behavior may differ slightly between a local environment and GitHub Pages.
 
 ---
 
 # Offline Support
 
-The browser version may use a service worker to cache application resources. Once the required files have been cached, supported browsers may allow portions of the application to continue functioning without a network connection.
+The browser version uses a service worker to cache application resources. Once the required files have been cached, supported browsers allow portions of the application to continue functioning offline.
 
 Files commonly involved include
 
 ```text
-manifest.json
+manifest.webmanifest
 sw.js
 index.html
 app.js
@@ -289,7 +303,7 @@ styles.css
 
 For a graph with $n$ vertices, the application may report quantities such as
 
-```text
+```
 Number of vertices: n
 
 Average tour weight:
@@ -327,7 +341,7 @@ The central quantities are
 
 $$\boxed{\Omega,\qquad \mu,\qquad \sigma^2,\qquad \ln Z,\qquad I(e)}$$
 
-Together they provide a statistical representation of the Hamiltonian solution space and a mechanism for comparing candidate optimization decisions.
+Together they provide a statistical representation of the Hamiltonian solution space and a mechanism for comparing candidate optimization decisions across any NP-complete problem class.
 
 ---
 
@@ -356,4 +370,4 @@ Independent research in combinatorial optimization, Hamiltonian problems, and st
 
 # Disclaimer
 
-This repository contains experimental research software. The implementation and numerical experiments are intended for research and educational purposes. Computational demonstrations should not be treated as definitive results without independent verification and peer review.
+This repository contains experimental research software. The implementation and numerical experiments are intended for research and educational purposes. Computational demonstrations should not be treated as formal proofs. Users are responsible for independent verification of results.
