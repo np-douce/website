@@ -178,15 +178,19 @@ The program can therefore evaluate candidate edges based not only on their indiv
 
 # Tour Construction
 
-Starting from $C_0 = \varnothing$, the program evaluates admissible candidate edges and selects
+Starting from \(C_0=\varnothing\), the program evaluates the set of admissible candidate edges \(A_t\) and selects
 
-$$e_t^* = \operatorname*{arg\,max}_e I_t(e).$$
+\[
+e_t^*=\arg\max_{e\in A_t} I_t(e).
+\]
 
-The chosen-edge set is then updated:
+The chosen-edge set is then updated as
 
-$$C_{t+1} = C_t \cup \{ e_t^* \}.$$ 
+\[
+C_{t+1}=C_t\cup\{e_t^*\}.
+\]
 
-This procedure is repeated while maintaining Hamiltonian feasibility constraints, including vertex degree restrictions and prevention of premature subtours. The process continues until the selected edges form a complete Hamiltonian cycle, at which point a valid solution is returned.
+At each step, the admissible set \(A_t\) is restricted so that Hamiltonian feasibility is preserved, including vertex-degree constraints and the prevention of premature subtours. The process continues until the selected edges form a complete Hamiltonian cycle.
 
 ---
 
