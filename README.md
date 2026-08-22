@@ -1,8 +1,8 @@
 # NP-Douce
 
-**NP-Douce** is an experimental research application for exploring combinatorial optimization problems using ideas from **statistical mechanics, exact combinatorial counting, and constrained solution spaces**.
+**NP-Douce** is an experimental research application for exploring combinatorial optimization problems using ideas from **statistical mechanics, exact combinatorial counting, and constrained soluti[...]
 
-The application is designed to study a broad class of **NP-complete problems** by reducing them to Hamiltonian cycle problems, then analyzing the statistical properties of the resulting solution spaces. By analyzing the statistical properties of large sets of candidate solutions, the software computes aggregate properties without explicitly enumerating all solutions.
+The application is designed to study a broad class of **NP-complete problems** by reducing them to Hamiltonian cycle problems, then analyzing the statistical properties of the resulting solution sp[...]
 
 ## Supported Problems
 
@@ -50,7 +50,7 @@ Rather than generating all of these tours explicitly, the program computes aggre
 * candidate-edge importance scores,
 * iterative construction of a Hamiltonian tour.
 
-**Note:** While this framework focuses on Hamiltonian cycles and the TSP, the underlying methodology extends beyond these specific problems. Through polynomial-time reductions, the statistical framework applies to any NP-complete problem that can be embedded as a Hamiltonian cycle constraint.
+**Note:** While this framework focuses on Hamiltonian cycles and the TSP, the underlying methodology extends beyond these specific problems. Through polynomial-time reductions, the statistical fra[...]
 
 ---
 
@@ -172,7 +172,7 @@ and
 
 $$\Delta \sigma_e^2 = \sigma_{C+e}^2 - \sigma_{C-e}^2.$$ 
 
-The program can therefore evaluate candidate edges based not only on their individual weights, but also on how each decision changes the statistical properties of the remaining Hamiltonian solution space.
+The program can therefore evaluate candidate edges based not only on their individual weights, but also on how each decision changes the statistical properties of the remaining Hamiltonian soluti[...]
 
 ---
 
@@ -186,7 +186,7 @@ The chosen-edge set is then updated:
 
 $$C_{t+1} = C_t \cup \{ e_t^* \}.$$ 
 
-This procedure is repeated while maintaining Hamiltonian feasibility constraints, including vertex degree restrictions and prevention of premature subtours. The process continues until the selected edges form a complete Hamiltonian cycle.
+This procedure is repeated while maintaining Hamiltonian feasibility constraints, including vertex degree restrictions and prevention of premature subtours. The process continues until the select[...]
 
 ---
 
@@ -285,7 +285,7 @@ Because the application uses browser technologies such as JavaScript, caching, a
 
 # Offline Support
 
-The browser version uses a service worker to cache application resources. Once the required files have been cached, supported browsers allow portions of the application to continue functioning offline.
+The browser version uses a service worker to cache application resources. Once the required files have been cached, supported browsers allow portions of the application to continue functioning of[...]
 
 Files commonly involved include
 
@@ -370,4 +370,4 @@ Independent research in combinatorial optimization, Hamiltonian problems, and st
 
 # Disclaimer
 
-This repository contains experimental research software. The implementation and numerical experiments are intended for research and educational purposes. Computational demonstrations should not be treated as formal proofs. Users are responsible for independent verification of results.
+This repository contains experimental research software. The implementation and numerical experiments are intended for research and educational purposes. Computational demonstrations should not b[...]
