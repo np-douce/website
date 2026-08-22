@@ -47,12 +47,8 @@
       <div class="globalControls">
         <label>HC solve node limit<input id="hcSolveNodeLimit" type="number" min="0" step="1" value="1000"></label>
         <label>HC backtrack tries<input id="hcBacktrackTries" type="number" min="0" max="500" step="1" value="0"></label>
-        <label>HC repair passes<input id="hcRepairPasses" type="number" min="0" max="100" step="1" value="0"></label>
-        <label>HC tour search<select id="hcTourSearchMode">
-          <option value="all" selected>Search all tries</option>
-          <option value="first">Stop at first HC tour</option>
-        </select></label>
-        <p class="fieldNote">Importance scoring and adaptive beta are automatic. Reduction tabs infer answers only when the reduced HC graph is at or under this limit. Backtracking retries the next best scored HC branches; larger values can run very slowly.</p>
+        <label class="switchLine">Search all answers<input id="hcSearchAllAnswers" type="checkbox" checked><span class="switchTrack"></span></label>
+        <p class="fieldNote">Importance scoring and adaptive beta are automatic. Reduction tabs infer answers only when the reduced HC graph is at or under this limit. Backtracking retries next-best scored branches.</p>
       </div>
 
       <section class="workspace">
@@ -189,6 +185,7 @@
 5 0 6 0
 0 6 0 8
 7 0 8 0</textarea>
+        <label>TSP repair passes<input id="matrixTspRepairPasses" type="number" min="0" max="100" step="1" value="0"></label>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="matrixFile" accept=".txt"></label>
           <button id="runMatrix">Run TSP matrix</button>
@@ -206,6 +203,7 @@
 1 0
 1 1
 0 1</textarea>
+        <label>TSP repair passes<input id="pointsTspRepairPasses" type="number" min="0" max="100" step="1" value="0"></label>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="pointsFile" accept=".txt"></label>
           <button id="runPoints">Run TSP points</button>
@@ -225,6 +223,7 @@
 6
 0
 8</textarea>
+        <label>TSP repair passes<input id="manualTspRepairPasses" type="number" min="0" max="100" step="1" value="0"></label>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="manualFile" accept=".txt"></label>
           <button id="runManual">Run TSP manual</button>

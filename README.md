@@ -46,13 +46,13 @@ The HC solver now uses the importance score automatically: `lnZ(CE + e) - lnZ(CE
 
 Adaptive beta is automatic. Each choice step recomputes the current conditioned standard deviation and uses `1 / current standard deviation`.
 
-Score-guided backtracking is controlled by `HC backtrack tries`, which defaults to `0`. On SAT-based reduction tabs, `0` means one greedy SAT witness branch with no saved alternatives; raising the value queues next-best witness branches. `HC tour search` can either stop when the first Hamiltonian witness is accepted or keep searching all allowed tries and list distinct witnesses it finds. Matrix, points, and manual weighted tabs keep using the all-tries best-tour behavior. The visible solver tuning is the HC solve node limit, `HC backtrack tries`, `HC repair passes`, and `HC tour search`.
+Score-guided backtracking is controlled by `HC backtrack tries`, which defaults to `0`. On SAT-based reduction tabs, `0` means one greedy SAT witness branch with no saved alternatives; raising the value queues next-best witness branches. The `Search all answers` switch can either stop when the first Hamiltonian witness is accepted or keep searching all allowed tries and list distinct witnesses it finds. Matrix, points, and manual weighted tabs keep using the all-tries best-tour behavior. The global solver tuning is the HC solve node limit, `HC backtrack tries`, and the `Search all answers` switch.
 
 Candidate edges are normalized with the state function omega. For each valid edge, the app uses the count term `N(e) = 2^(CE - 1) * (n - 1 - VCE + CE)!`, computes `L(e) = ln(N(e)) - beta * mean + 0.5 * beta^2 * variance`, shifts by `M = max L`, then uses `P(e) = exp(L(e) - M) / omega` with `omega = sum exp(L(f) - M)`.
 
-Before scoring, the HC solver runs the original degree-2 forced-edge precheck: if a vertex has exactly two listed HC edges, both are forced into the tour before the scoring loop continues. The stronger dynamic pruning experiment was removed because it was slower and rejected useful branches on the reduction tabs.
+Before scoring, the raw HC solver runs necessary graph checks and the original degree-2 forced-edge precheck: if a vertex has exactly two listed HC edges, both are forced into the tour before the scoring loop continues.
 
-`HC repair passes` defaults to `0`. When raised for raw HC/TSP-style tours, it runs local repair after the math-selected tour. SAT-based reduction tabs do not need repair to complete unrelated HC edges after their original decision witnesses are committed.
+`TSP repair passes` appears only inside the matrix, points, and manual TSP tabs. It defaults to `0`. When raised, it runs local repair only after weighted TSP tours are built. Reduction tabs and raw HC keep repair disabled.
 
 ## 3-SAT input format
 

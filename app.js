@@ -2237,11 +2237,11 @@ function getHcAdaptiveBeta() {
   return true;
 }
 
-function getHcRepairPasses() {
-  const input = document.getElementById("hcRepairPasses");
+function getTspRepairPasses(inputId) {
+  const input = document.getElementById(inputId);
   if (!input) return 0;
   const value = Number(input.value);
-  if (!Number.isFinite(value) || value < 0) throw new Error("HC repair passes must be a nonnegative number.");
+  if (!Number.isFinite(value) || value < 0) throw new Error("TSP repair passes must be a nonnegative number.");
   return Math.floor(value);
 }
 
@@ -2254,6 +2254,8 @@ function getHcBacktrackTries() {
 }
 
 function getHcTourSearchMode() {
+  const checkbox = document.getElementById("hcSearchAllAnswers");
+  if (checkbox) return checkbox.checked ? "all" : "first";
   const input = document.getElementById("hcTourSearchMode");
   return input && input.value === "first" ? "first" : "all";
 }
@@ -2290,7 +2292,7 @@ function runCompressedHcDecision(graph, sourceLabel) {
     candidateEdgeList: graph.allowedEdges || graphEdgeList,
     preferredCandidateEdgeList,
     vertexCoverPropagation: graph.vertexCoverPropagation || null,
-    repairPasses: getHcRepairPasses(),
+    repairPasses: 0,
     backtrackLimit: backtrackTries,
     stopAtFirstHamiltonian: shouldStopAtFirstHcTour(),
     completeWithNeutralEdges: true,
@@ -6281,7 +6283,7 @@ document.getElementById("runPairs").addEventListener("click", () => runSafely(()
     forceDegreeTwo: true,
     completeWithNeutralEdges: false,
     requireNonzeroFinalEdge: true,
-    repairPasses: getHcRepairPasses(),
+    repairPasses: 0,
     backtrackLimit: getHcBacktrackTries(),
     stopAtFirstHamiltonian: shouldStopAtFirstHcTour(),
     tourKind: "hc",
@@ -6293,7 +6295,7 @@ document.getElementById("runPairs").addEventListener("click", () => runSafely(()
 document.getElementById("runMatrix").addEventListener("click", () => runSafely(() => {
   const { edge, n } = parseMatrix(document.getElementById("matrixInput").value);
   return runTrackingSolver(edge, n, NaN, "browser matrix input", {
-    repairPasses: getHcRepairPasses(),
+    repairPasses: getTspRepairPasses("matrixTspRepairPasses"),
     backtrackLimit: getHcBacktrackTries(),
     tourKind: "tsp",
     adaptiveBeta: true,
@@ -6307,7 +6309,7 @@ document.getElementById("runPoints").addEventListener("click", () => runSafely((
     scoreZeroEdges: true,
     euclideanPoints: points,
     removeEuclideanCrossings: true,
-    repairPasses: getHcRepairPasses(),
+    repairPasses: getTspRepairPasses("pointsTspRepairPasses"),
     backtrackLimit: getHcBacktrackTries(),
     tourKind: "tsp",
     adaptiveBeta: true,
@@ -6318,7 +6320,7 @@ document.getElementById("runPoints").addEventListener("click", () => runSafely((
 document.getElementById("runManual").addEventListener("click", () => runSafely(() => {
   const { edge, n } = parseManual(document.getElementById("manualInput").value);
   return runTrackingSolver(edge, n, NaN, "browser manual input", {
-    repairPasses: getHcRepairPasses(),
+    repairPasses: getTspRepairPasses("manualTspRepairPasses"),
     backtrackLimit: getHcBacktrackTries(),
     tourKind: "tsp",
     adaptiveBeta: true,
