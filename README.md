@@ -1,8 +1,8 @@
-# NP-Soft
+# NP-Douce
 
-**NP-Soft** is an experimental research application for exploring combinatorial optimization problems using ideas from **statistical mechanics, exact combinatorial counting, and constrained solution ensembles**.
+**NP-Douce** is an experimental research application for exploring combinatorial optimization problems using ideas from **statistical mechanics, exact combinatorial counting, and constrained solution spaces**.
 
-The application is designed to study problems such as the **Traveling Salesman Problem (TSP)** and related Hamiltonian-cycle problems by analyzing the statistical properties of large sets of candidate tours.
+The application is designed to study problems such as the **Traveling Salesman Problem (TSP)** and related Hamiltonian-cycle problems by analyzing the statistical properties of large sets of candidate solutions.
 
 ## Live Demo
 
@@ -20,7 +20,7 @@ For a complete weighted graph
 
 $$G = (V, E)$$
 
-with $n = |V|$ vertices, NP-Soft considers the complete ensemble of Hamiltonian cycles.
+with $n = |V|$ vertices, NP-Douce considers the complete ensemble of Hamiltonian cycles.
 
 The number of distinct undirected Hamiltonian cycles is
 
@@ -35,6 +35,8 @@ Rather than generating all of these tours explicitly, the program computes aggre
 * approximate partition functions,
 * candidate-edge importance scores,
 * iterative construction of a Hamiltonian tour.
+
+**Note:** While this framework focuses on Hamiltonian cycles and the TSP, the underlying methodology extends beyond these specific problems. Through polynomial-time reductions, the statistical data and combinatorial counting techniques can be applied theoretically to all NP-complete problems, enabling computation of exact ensemble statistics for a broad class of computationally hard problems.
 
 ---
 
@@ -104,7 +106,7 @@ Expanding the logarithm of the partition function around $\beta = 0$ gives the c
 
 $$\ln Z(\beta) = \ln \Omega - \beta \kappa_1 + \frac{\beta^2}{2!} \kappa_2 - \frac{\beta^3}{3!} \kappa_3 + \cdots.$$ 
 
-Using $\kappa_1 = \mu$ and $\kappa_2 = \sigma^2$, NP-Soft uses the second-order approximation
+Using $\kappa_1 = \mu$ and $\kappa_2 = \sigma^2$, NP-Douce uses the second-order approximation
 
 $$\ln Z(\beta) \approx \ln \Omega - \beta \mu + \frac{\beta^2 \sigma^2}{2}.$$ 
 
@@ -114,7 +116,7 @@ This provides a compact statistical description of an otherwise extremely large 
 
 # Constrained Hamiltonian Ensembles
 
-NP-Soft can also calculate statistics after certain edges have already been chosen.
+NP-Douce can also calculate statistics after certain edges have already been chosen.
 
 Let
 
@@ -138,7 +140,7 @@ $$\ln Z_C(\beta) \approx \ln \Omega_C - \beta \mu_C + \frac{\beta^2 \sigma_C^2}{
 
 # Edge Importance
 
-For a candidate edge $e$, NP-Soft compares two possible future solution spaces: (1) tours where the edge is selected, and (2) tours where the edge is forbidden.
+For a candidate edge $e$, NP-Douce compares two possible future solution spaces: (1) tours where the edge is selected, and (2) tours where the edge is forbidden.
 
 The edge-importance score is
 
@@ -170,7 +172,7 @@ The chosen-edge set is then updated:
 
 $$C_{t+1} = C_t \cup \{ e_t^* \}.$$ 
 
-This procedure is repeated while maintaining Hamiltonian feasibility constraints, including vertex degree restrictions and prevention of premature subtours. The process continues until the selected edges form a complete Hamiltonian cycle.
+This procedure is repeated while maintaining Hamiltonian feasibility constraints, including vertex degree restrictions and prevention of premature subtours. The process continues until the selected edges form a complete Hamiltonian tour.
 
 ---
 
@@ -220,7 +222,7 @@ The browser application provides an interactive implementation of the framework.
 
 # Research Status
 
-NP-Soft should be considered an **experimental research prototype and reference implementation**.
+NP-Douce should be considered an **experimental research prototype and reference implementation**.
 
 The application is intended to support experimentation, verification, benchmarking, and visualization of the mathematical framework.
 
@@ -233,7 +235,7 @@ Results obtained from the software should be independently verified when used fo
 A typical repository layout is
 
 ```text
-NP-Soft/
+NP-Douce/
 │
 ├── index.html
 ├── app.js
@@ -269,7 +271,7 @@ Because the application uses browser technologies such as JavaScript, caching, a
 
 # Offline Support
 
-The browser version may use a service worker to cache application resources. Once the required files have been cached, supported browsers may allow portions of the application to continue functioning without an active internet connection.
+The browser version may use a service worker to cache application resources. Once the required files have been cached, supported browsers may allow portions of the application to continue functioning without a network connection.
 
 Files commonly involved include
 
@@ -317,13 +319,13 @@ The exact output depends on the selected problem and implementation.
 
 The project is intended to explore whether useful global information about difficult combinatorial solution spaces can be obtained from exact combinatorial statistics.
 
-In particular, NP-Soft investigates the relationship
+In particular, NP-Douce investigates the relationship
 
 $$\text{Combinatorics} \quad\longleftrightarrow\quad \text{Statistical Mechanics} \quad\longleftrightarrow\quad \text{Optimization}.$$ 
 
 The central quantities are
 
-$$\boxed{\Omega,\qquad \mu,\qquad \sigma^2,\qquad \ln Z,\qquad I(e).}$$ 
+$$\boxed{\Omega,\qquad \mu,\qquad \sigma^2,\qquad \ln Z,\qquad I(e)}$$
 
 Together they provide a statistical representation of the Hamiltonian solution space and a mechanism for comparing candidate optimization decisions.
 
@@ -334,9 +336,9 @@ Together they provide a statistical representation of the Hamiltonian solution s
 If you use this project in academic work, please cite the associated paper or repository. A formal citation can be added here once the final publication information is available.
 
 ```bibtex
-@software{npsoft,
+@software{npdouce,
   author = {Michel Seraphin},
-  title  = {NP-Soft},
+  title  = {NP-Douce},
   year   = {2026},
   note   = {Experimental research software for combinatorial optimization}
 }
@@ -354,4 +356,4 @@ Independent research in combinatorial optimization, Hamiltonian problems, and st
 
 # Disclaimer
 
-This repository contains experimental research software. The implementation and numerical experiments are intended for research and educational purposes. Computational demonstrations should not be interpreted by themselves as formal proofs of complexity or mathematical claims.
+This repository contains experimental research software. The implementation and numerical experiments are intended for research and educational purposes. Computational demonstrations should not be treated as definitive results without independent verification and peer review.
