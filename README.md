@@ -1,8 +1,8 @@
 # NP-Douce
 
-**NP-Douce** is an experimental research application for exploring combinatorial optimization problems using ideas from **statistical mechanics, exact combinatorial counting, and constrained solution-space analysis**.
+**NP-Douce** is an experimental research application for exploring combinatorial optimization problems using ideas from **statistical mechanics, exact combinatorial counting, and constrained solution spaces**.
 
-The application is designed to study a broad class of **NP-complete problems** by reducing them to Hamiltonian cycle problems, then analyzing the statistical properties of the resulting solution space through exact combinatorial methods and statistical-mechanical approximations.
+The application is designed to study a broad class of **NP-complete problems** by reducing them to Hamiltonian cycle problems, then analyzing the statistical properties of the resulting solution space.
 
 ## Supported Problems
 
@@ -50,7 +50,7 @@ Rather than generating all of these tours explicitly, the program computes aggre
 * candidate-edge importance scores,
 * iterative construction of a Hamiltonian tour.
 
-**Note:** While this framework focuses on Hamiltonian cycles and the TSP, the underlying methodology extends beyond these specific problems. Through polynomial-time reductions, the statistical framework can be applied to any NP-complete problem, provided the reduction preserves the relevant combinatorial structure and allows meaningful statistical analysis of the solution space.
+**Note:** While this framework focuses on Hamiltonian cycles and the TSP, the underlying methodology extends beyond these specific problems. Through polynomial-time reductions, the statistical framework applies to any NP-complete problem.
 
 ---
 
@@ -172,7 +172,7 @@ and
 
 $$\Delta \sigma_e^2 = \sigma_{C+e}^2 - \sigma_{C-e}^2.$$ 
 
-The program can therefore evaluate candidate edges based not only on their individual weights, but also on how each decision changes the statistical properties of the remaining Hamiltonian solution space, allowing for informed greedy selection at each step.
+The program can therefore evaluate candidate edges based not only on their individual weights, but also on how each decision changes the statistical properties of the remaining Hamiltonian solution space.
 
 ---
 
@@ -291,7 +291,7 @@ Because the application uses browser technologies such as JavaScript, caching, a
 
 # Offline Support
 
-The browser version uses a service worker to cache application resources. Once the required files have been cached, supported browsers allow portions of the application to continue functioning offline, subject to browser-specific cache policies and storage limitations.
+The browser version uses a service worker to cache application resources. Once the required files have been cached, supported browsers allow portions of the application to continue functioning offline.
 
 Files commonly involved include
 
@@ -376,4 +376,4 @@ Independent research in combinatorial optimization, Hamiltonian problems, and st
 
 # Disclaimer
 
-This repository contains experimental research software. The implementation and numerical experiments are intended for research and educational purposes. Computational demonstrations should not be construed as formal proofs of computational complexity results or polynomial-time solvability of NP-complete problems.
+This repository contains experimental research software. The implementation and numerical experiments are intended for research and educational purposes. Computational demonstrations should not be construed as definitive complexity-theoretic or formal proofs.
