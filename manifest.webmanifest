@@ -4,5 +4,12 @@
   "start_url": "index.html",
   "display": "standalone",
   "background_color": "#090d12",
-  "theme_color": "#2dd4bf"
+  "theme_color": "#2dd4bf",
+  "icons": [
+    {
+      "src": "np-douce-logo.png",
+      "sizes": "1280x1280",
+      "type": "image/png"
+    }
+  ]
 }
