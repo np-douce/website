@@ -2714,6 +2714,398 @@ function buildComplementEdges(n, edges) {
   return complement;
 }
 
+function reduceCliqueByCore(n, k, edges) {
+  if (k <= 1) {
+    return {
+      n,
+      edges: normalizeUndirectedEdges(n, edges),
+      vertexMap: Array.from({ length: n }, (_, index) => index + 1),
+      removed: 0
+    };
+  }
+
+  const normalized = normalizeUndirectedEdges(n, edges);
+  const adjacency = Array.from({ length: n + 1 }, () => new Set());
+  for (const [u, v] of normalized) {
+    adjacency[u].add(v);
+    adjacency[v].add(u);
+  }
+
+  const active = Array(n + 1).fill(true);
+  active[0] = false;
+  let removed = 0;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let vertex = 1; vertex <= n; vertex++) {
+      if (!active[vertex]) continue;
+      let activeDegree = 0;
+      for (const neighbor of adjacency[vertex]) if (active[neighbor]) activeDegree += 1;
+      if (activeDegree < k - 1) {
+        active[vertex] = false;
+        removed += 1;
+        changed = true;
+      }
+    }
+  }
+
+  const vertexMap = [];
+  const remap = Array(n + 1).fill(0);
+  for (let vertex = 1; vertex <= n; vertex++) {
+    if (!active[vertex]) continue;
+    remap[vertex] = vertexMap.length + 1;
+    vertexMap.push(vertex);
+  }
+
+  const reducedEdges = [];
+  for (const [u, v] of normalized) {
+    if (!active[u] || !active[v]) continue;
+    reducedEdges.push([remap[u], remap[v]]);
+  }
+
+  return {
+    n: vertexMap.length,
+    edges: reducedEdges,
+    vertexMap,
+    removed
+  };
+}
+
+function reduceIndependentSetByCore(n, k, edges) {
+  if (k <= 1) {
+    return {
+      n,
+      edges: normalizeUndirectedEdges(n, edges),
+      vertexMap: Array.from({ length: n }, (_, index) => index + 1),
+      removed: 0
+    };
+  }
+
+  const normalized = normalizeUndirectedEdges(n, edges);
+  const adjacency = Array.from({ length: n + 1 }, () => new Set());
+  for (const [u, v] of normalized) {
+    adjacency[u].add(v);
+    adjacency[v].add(u);
+  }
+
+  const active = Array(n + 1).fill(true);
+  active[0] = false;
+  let removed = 0;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let vertex = 1; vertex <= n; vertex++) {
+      if (!active[vertex]) continue;
+      let activeNonNeighbors = 0;
+      for (let other = 1; other <= n; other++) {
+        if (other !== vertex && active[other] && !adjacency[vertex].has(other)) activeNonNeighbors += 1;
+      }
+      if (activeNonNeighbors < k - 1) {
+        active[vertex] = false;
+        removed += 1;
+        changed = true;
+      }
+    }
+  }
+
+  const vertexMap = [];
+  const remap = Array(n + 1).fill(0);
+  for (let vertex = 1; vertex <= n; vertex++) {
+    if (!active[vertex]) continue;
+    remap[vertex] = vertexMap.length + 1;
+    vertexMap.push(vertex);
+  }
+
+  const reducedEdges = [];
+  for (const [u, v] of normalized) {
+    if (!active[u] || !active[v]) continue;
+    reducedEdges.push([remap[u], remap[v]]);
+  }
+
+  return {
+    n: vertexMap.length,
+    edges: reducedEdges,
+    vertexMap,
+    removed
+  };
+}
+
+function greedyMatchingLowerBound(edges) {
+  const used = new Set();
+  let count = 0;
+  for (const [u, v] of edges) {
+    if (used.has(u) || used.has(v)) continue;
+    used.add(u);
+    used.add(v);
+    count += 1;
+  }
+  return count;
+}
+
+function reduceVertexCoverBySafeRules(n, k, edges) {
+  const normalized = normalizeUndirectedEdges(n, edges);
+  const active = Array(n + 1).fill(true);
+  active[0] = false;
+  const forcedCover = [];
+  let removedIsolated = 0;
+  let forcedHighDegree = 0;
+  let remainingK = k;
+  let impossibleReason = "";
+
+  const currentEdgesAndDegree = () => {
+    const degree = Array(n + 1).fill(0);
+    const remainingEdges = [];
+    for (const [u, v] of normalized) {
+      if (!active[u] || !active[v]) continue;
+      remainingEdges.push([u, v]);
+      degree[u] += 1;
+      degree[v] += 1;
+    }
+    return { degree, remainingEdges };
+  };
+
+  let changed = true;
+  while (changed && !impossibleReason) {
+    changed = false;
+    const { degree } = currentEdgesAndDegree();
+    for (let vertex = 1; vertex <= n; vertex++) {
+      if (!active[vertex] || degree[vertex] !== 0) continue;
+      active[vertex] = false;
+      removedIsolated += 1;
+      changed = true;
+    }
+    if (changed) continue;
+
+    for (let vertex = 1; vertex <= n; vertex++) {
+      if (!active[vertex] || degree[vertex] <= remainingK) continue;
+      forcedCover.push(vertex);
+      active[vertex] = false;
+      remainingK -= 1;
+      forcedHighDegree += 1;
+      changed = true;
+      if (remainingK < 0) {
+        impossibleReason = `forced more than k=${k} vertices into the cover`;
+      }
+      break;
+    }
+  }
+
+  const { remainingEdges } = currentEdgesAndDegree();
+  const matchingLowerBound = greedyMatchingLowerBound(remainingEdges);
+  if (!impossibleReason && matchingLowerBound > remainingK) {
+    impossibleReason = `matching lower bound ${matchingLowerBound} is larger than remaining k=${remainingK}`;
+  }
+
+  const vertexMap = [];
+  const remap = Array(n + 1).fill(0);
+  for (let vertex = 1; vertex <= n; vertex++) {
+    if (!active[vertex]) continue;
+    remap[vertex] = vertexMap.length + 1;
+    vertexMap.push(vertex);
+  }
+
+  const reducedEdges = [];
+  for (const [u, v] of remainingEdges) {
+    reducedEdges.push([remap[u], remap[v]]);
+  }
+
+  return {
+    n: vertexMap.length,
+    k: remainingK,
+    edges: reducedEdges,
+    vertexMap,
+    forcedCover: forcedCover.sort((a, b) => a - b),
+    removedIsolated,
+    forcedHighDegree,
+    matchingLowerBound,
+    impossible: Boolean(impossibleReason),
+    impossibleReason
+  };
+}
+
+function reduceSetCoverBySafeRules(universeSize, k, sets) {
+  const remainingElements = new Set(Array.from({ length: universeSize }, (_, index) => index + 1));
+  let activeSetIndices = sets.map((_, index) => index);
+  const forcedSets = [];
+  let remainingK = k;
+  let impossibleReason = "";
+  let changed = true;
+
+  while (changed && !impossibleReason) {
+    changed = false;
+    const coveringByElement = Array.from({ length: universeSize + 1 }, () => []);
+    for (const setIndex of activeSetIndices) {
+      for (const element of sets[setIndex]) {
+        if (remainingElements.has(element)) coveringByElement[element].push(setIndex);
+      }
+    }
+
+    for (const element of remainingElements) {
+      const covering = coveringByElement[element];
+      if (covering.length === 0) {
+        impossibleReason = `element ${element} is not contained in any remaining set`;
+        break;
+      }
+      if (covering.length === 1) {
+        const forcedIndex = covering[0];
+        if (!forcedSets.includes(forcedIndex)) {
+          forcedSets.push(forcedIndex);
+          remainingK -= 1;
+          if (remainingK < 0) {
+            impossibleReason = `forced more than k=${k} sets`;
+            break;
+          }
+        }
+        for (const covered of sets[forcedIndex]) remainingElements.delete(covered);
+        activeSetIndices = activeSetIndices.filter(index => index !== forcedIndex);
+        changed = true;
+        break;
+      }
+    }
+
+    activeSetIndices = activeSetIndices.filter(index => sets[index].some(element => remainingElements.has(element)));
+  }
+
+  if (!impossibleReason && remainingElements.size > 0) {
+    let maxSetSize = 0;
+    for (const setIndex of activeSetIndices) {
+      let size = 0;
+      for (const element of sets[setIndex]) if (remainingElements.has(element)) size += 1;
+      maxSetSize = Math.max(maxSetSize, size);
+    }
+    if (maxSetSize === 0) {
+      impossibleReason = "no remaining set covers an uncovered element";
+    } else {
+      const lowerBound = Math.ceil(remainingElements.size / maxSetSize);
+      if (lowerBound > remainingK) impossibleReason = `set-cover lower bound ${lowerBound} is larger than remaining k=${remainingK}`;
+    }
+  }
+
+  const elementMap = Array.from(remainingElements).sort((a, b) => a - b);
+  const elementRemap = Array(universeSize + 1).fill(0);
+  elementMap.forEach((element, index) => {
+    elementRemap[element] = index + 1;
+  });
+
+  const setMap = [];
+  const reducedSets = [];
+  for (const setIndex of activeSetIndices) {
+    const reducedSet = [];
+    const seen = new Set();
+    for (const element of sets[setIndex]) {
+      const mapped = elementRemap[element];
+      if (!mapped || seen.has(mapped)) continue;
+      seen.add(mapped);
+      reducedSet.push(mapped);
+    }
+    if (reducedSet.length === 0) continue;
+    setMap.push(setIndex + 1);
+    reducedSets.push(reducedSet);
+  }
+
+  return {
+    universeSize: elementMap.length,
+    setCount: reducedSets.length,
+    k: remainingK,
+    sets: reducedSets,
+    elementMap,
+    setMap,
+    forcedSets: forcedSets.map(index => index + 1).sort((a, b) => a - b),
+    impossible: Boolean(impossibleReason),
+    impossibleReason
+  };
+}
+
+function reduceX3cBySafeRules(universeSize, sets) {
+  if (universeSize % 3 !== 0) {
+    return {
+      universeSize,
+      setCount: sets.length,
+      sets,
+      elementMap: Array.from({ length: universeSize }, (_, index) => index + 1),
+      setMap: sets.map((_, index) => index + 1),
+      forcedSets: [],
+      targetSetCount: "not integral",
+      impossible: true,
+      impossibleReason: `universe size ${universeSize} is not divisible by 3`
+    };
+  }
+
+  const targetSetCount = universeSize / 3;
+  const remainingElements = new Set(Array.from({ length: universeSize }, (_, index) => index + 1));
+  let activeSetIndices = sets.map((_, index) => index);
+  const forcedSets = [];
+  let impossibleReason = "";
+  let changed = true;
+
+  while (changed && !impossibleReason) {
+    changed = false;
+    const coveringByElement = Array.from({ length: universeSize + 1 }, () => []);
+    for (const setIndex of activeSetIndices) {
+      for (const element of sets[setIndex]) {
+        if (remainingElements.has(element)) coveringByElement[element].push(setIndex);
+      }
+    }
+
+    for (const element of remainingElements) {
+      const covering = coveringByElement[element];
+      if (covering.length === 0) {
+        impossibleReason = `element ${element} is not contained in any remaining 3-set`;
+        break;
+      }
+      if (covering.length === 1) {
+        const forcedIndex = covering[0];
+        if (!forcedSets.includes(forcedIndex)) forcedSets.push(forcedIndex);
+        if (forcedSets.length > targetSetCount) {
+          impossibleReason = `forced more than target=${targetSetCount} 3-sets`;
+          break;
+        }
+        const forcedElements = new Set(sets[forcedIndex]);
+        for (const covered of forcedElements) remainingElements.delete(covered);
+        activeSetIndices = activeSetIndices.filter(index =>
+          index !== forcedIndex && !sets[index].some(item => forcedElements.has(item)));
+        changed = true;
+        break;
+      }
+    }
+  }
+
+  const remainingTarget = targetSetCount - forcedSets.length;
+  if (!impossibleReason && remainingElements.size !== remainingTarget * 3) {
+    impossibleReason = `remaining uncovered element count ${remainingElements.size} does not match remaining target ${remainingTarget} 3-sets`;
+  }
+  if (!impossibleReason && remainingElements.size > 0 && activeSetIndices.length < remainingTarget) {
+    impossibleReason = `only ${activeSetIndices.length} remaining 3-sets for target ${remainingTarget}`;
+  }
+
+  const elementMap = Array.from(remainingElements).sort((a, b) => a - b);
+  const elementRemap = Array(universeSize + 1).fill(0);
+  elementMap.forEach((element, index) => {
+    elementRemap[element] = index + 1;
+  });
+
+  const setMap = [];
+  const reducedSets = [];
+  for (const setIndex of activeSetIndices) {
+    const reducedSet = sets[setIndex].map(element => elementRemap[element]);
+    if (reducedSet.some(element => !element)) continue;
+    setMap.push(setIndex + 1);
+    reducedSets.push(reducedSet);
+  }
+
+  return {
+    universeSize: elementMap.length,
+    setCount: reducedSets.length,
+    sets: reducedSets,
+    elementMap,
+    setMap,
+    forcedSets: forcedSets.map(index => index + 1).sort((a, b) => a - b),
+    targetSetCount,
+    impossible: Boolean(impossibleReason),
+    impossibleReason
+  };
+}
+
 function normalizeUndirectedEdges(n, edges) {
   const seen = new Set();
   const normalized = [];
@@ -3501,6 +3893,11 @@ function vertexCoverWitnessValid(state, vertexCount, coverLimit, edges) {
   return true;
 }
 
+function currentVertexCoverWitnessCover(state, vertexCount, coverLimit, edges) {
+  if (!vertexCoverWitnessValid(state, vertexCount, coverLimit, edges)) return null;
+  return sortedVertexCoverSet(state, vertexCount);
+}
+
 function vertexCoverPartialWitnessValid(state, coverLimit, edges) {
   const selected = state.vcSelectedVertices || new Set();
   const rejected = state.vcRejectedVertices || new Set();
@@ -3566,12 +3963,89 @@ function buildVertexCoverDecisionCandidates(graph, vertexCount) {
   return candidates;
 }
 
+function vertexCoverDecisionWithinCapacity(candidate, state, meta, coverLimit) {
+  const selected = state.vcSelectedVertices || new Set();
+  const rejected = state.vcRejectedVertices || new Set();
+  const rejectedTarget = Math.max(0, Math.floor(Number(meta.witnessTargetSize || 0)));
+  const hasRejectedTarget = (meta.witnessKind === "clique" || meta.witnessKind === "independentSet") && rejectedTarget > 0;
+  if (candidate.kind === "cover") {
+    if (rejected.has(candidate.vertex)) return false;
+    const nextSelectedSize = selected.size + (selected.has(candidate.vertex) ? 0 : 1);
+    if (nextSelectedSize > coverLimit) return false;
+    return !hasRejectedTarget || vertexCountFromMeta(meta, selected, rejected) - nextSelectedSize >= rejectedTarget;
+  }
+
+  if (selected.has(candidate.vertex)) return false;
+  if (hasRejectedTarget && rejected.size + (rejected.has(candidate.vertex) ? 0 : 1) > rejectedTarget) return false;
+  let addedSelected = 0;
+  for (const neighbor of meta.neighborsByVertex[candidate.vertex] || []) {
+    if (rejected.has(neighbor)) return false;
+    if (!selected.has(neighbor)) addedSelected += 1;
+  }
+  return selected.size + addedSelected <= coverLimit;
+}
+
+function vertexCountFromMeta(meta, selected, rejected) {
+  if (Number.isFinite(meta.vertexCount)) return meta.vertexCount;
+  const neighborCount = Math.max(0, (meta.neighborsByVertex || []).length - 1);
+  let maxSeen = neighborCount;
+  for (const vertex of selected || []) maxSeen = Math.max(maxSeen, vertex);
+  for (const vertex of rejected || []) maxSeen = Math.max(maxSeen, vertex);
+  return maxSeen;
+}
+
+function vertexCoverRejectedTargetCandidateFeasible(candidate, state, meta, vertexCount) {
+  const rejectedTarget = Math.max(0, Math.floor(Number(meta.witnessTargetSize || 0)));
+  if ((meta.witnessKind !== "clique" && meta.witnessKind !== "independentSet") || rejectedTarget === 0) return true;
+  const selected = state.vcSelectedVertices || new Set();
+  const rejected = state.vcRejectedVertices || new Set();
+  if (rejected.size >= rejectedTarget) return candidate.kind === "cover";
+  if (candidate.kind !== "reject") return false;
+  if (selected.has(candidate.vertex)) return false;
+
+  const nextRejected = new Set(rejected);
+  nextRejected.add(candidate.vertex);
+  if (nextRejected.size > rejectedTarget) return false;
+  if (nextRejected.size >= rejectedTarget) return true;
+
+  let compatibleCount = nextRejected.size;
+  for (let vertex = 1; vertex <= vertexCount; vertex++) {
+    if (selected.has(vertex) || nextRejected.has(vertex)) continue;
+    let compatible = true;
+    for (const chosen of nextRejected) {
+      if ((meta.neighborsByVertex[chosen] || []).includes(vertex)) {
+        compatible = false;
+        break;
+      }
+    }
+    if (compatible) compatibleCount += 1;
+  }
+  return compatibleCount >= rejectedTarget;
+}
+
+function vertexCoverRejectedTargetWitnessCover(state, meta, vertexCount, coverLimit, edges) {
+  const rejectedTarget = Math.max(0, Math.floor(Number(meta.witnessTargetSize || 0)));
+  if ((meta.witnessKind !== "clique" && meta.witnessKind !== "independentSet") || rejectedTarget === 0) return null;
+  const rejected = state.vcRejectedVertices || new Set();
+  if (rejected.size < rejectedTarget) return null;
+  if (!vertexCoverPartialWitnessValid(state, coverLimit, edges)) return null;
+  const cover = [];
+  for (let vertex = 1; vertex <= vertexCount; vertex++) {
+    if (!rejected.has(vertex)) cover.push(vertex);
+  }
+  return cover.length <= coverLimit ? cover : null;
+}
+
 function currentVertexCoverDecisionCandidateEdges(candidates, state, graph, endpointLink, coverLimit) {
+  const meta = graph.vertexCoverPropagation;
+  const vertexCount = vertexCountFromMeta(meta, state.vcSelectedVertices, state.vcRejectedVertices);
   const selected = state.vcSelectedVertices || new Set();
   const rejected = state.vcRejectedVertices || new Set();
   const result = [];
   for (const candidate of candidates) {
     if (selected.has(candidate.vertex) || rejected.has(candidate.vertex)) continue;
+    if (!vertexCoverDecisionWithinCapacity(candidate, state, meta, coverLimit)) continue;
+    if (!vertexCoverRejectedTargetCandidateFeasible(candidate, state, meta, vertexCount)) continue;
     if (candidate.kind === "cover" && selected.size >= coverLimit) continue;
     const edgeInfo = candidate.edgeChoices.find(choice => satDecisionEdgeAvailable(choice, graph.edge, endpointLink));
     if (!edgeInfo) continue;
@@ -3643,7 +4117,99 @@ function forceVertexCoverCapacityConsequences(vertexCount, meta, edge, endpointL
   return result;
 }
 
+function forceVertexCoverRejectedTargetConsequences(vertexCount, meta, edge, endpointLink, state) {
+  const result = { forcedDecisions: 0, forcedEdgeCount: 0 };
+  ensureVertexCoverPropagationState(state);
+  const rejectedTarget = Math.max(0, Math.floor(Number(meta.witnessTargetSize || 0)));
+  if ((meta.witnessKind !== "clique" && meta.witnessKind !== "independentSet") || rejectedTarget === 0) return result;
+  if ((state.vcRejectedVertices || new Set()).size < rejectedTarget) return result;
+  const chosenKeys = chosenEdgeKeySet(state);
+  for (let vertex = 1; vertex <= vertexCount; vertex++) {
+    if (state.vcSelectedVertices.has(vertex) || state.vcRejectedVertices.has(vertex)) continue;
+    const forced = forceVertexCoverSelected(vertex, meta, edge, endpointLink, state, chosenKeys);
+    result.forcedDecisions += forced.selectedVertexCount;
+    result.forcedEdgeCount += forced.forcedEdgeCount;
+    if (state.invalid) return result;
+  }
+  return result;
+}
+
+function applyVertexCoverWitnessOnlyDecisionCandidate(branch, candidate, graph, searchOptions) {
+  if (!applyChosenEdge(candidate.from, candidate.to, graph.edge, branch.endpointLink, branch.state)) {
+    branch.state.invalid = true;
+    branch.state.invalidReason = `Vertex Cover witness choice ${vertexCoverDecisionLabel(candidate)} could not be applied.`;
+    return false;
+  }
+
+  const meta = searchOptions.vertexCoverPropagation;
+  ensureVertexCoverPropagationState(branch.state);
+  const selected = branch.state.vcSelectedVertices;
+  const rejected = branch.state.vcRejectedVertices;
+  const coverLimit = meta.coverLimit;
+  let forcedDecisionCount = 0;
+
+  const selectVertex = vertex => {
+    if (rejected.has(vertex)) {
+      branch.state.invalid = true;
+      branch.state.invalidReason = `Vertex Cover contradiction: vertex ${vertex} was both chosen and not chosen.`;
+      return false;
+    }
+    if (!selected.has(vertex)) {
+      selected.add(vertex);
+      forcedDecisionCount += 1;
+      if (selected.size > coverLimit) {
+        branch.state.invalid = true;
+        branch.state.invalidReason = `Vertex Cover propagation selected more than k=${coverLimit} vertices.`;
+        return false;
+      }
+    }
+    return true;
+  };
+
+  const rejectVertex = vertex => {
+    if (selected.has(vertex)) {
+      branch.state.invalid = true;
+      branch.state.invalidReason = `Vertex Cover contradiction: vertex ${vertex} was both chosen and not chosen.`;
+      return false;
+    }
+    if (!rejected.has(vertex)) {
+      rejected.add(vertex);
+      forcedDecisionCount += 1;
+    }
+    return true;
+  };
+
+  if (candidate.kind === "cover") {
+    if (!selectVertex(candidate.vertex)) return false;
+  } else {
+    if (!rejectVertex(candidate.vertex)) return false;
+    for (const neighbor of meta.neighborsByVertex[candidate.vertex] || []) {
+      if (!selectVertex(neighbor)) return false;
+    }
+  }
+
+  if (selected.size >= coverLimit) {
+    for (let vertex = 1; vertex <= searchOptions.vertexCount; vertex++) {
+      if (selected.has(vertex) || rejected.has(vertex)) continue;
+      if (!rejectVertex(vertex)) return false;
+    }
+  }
+
+  branch.decisions.push({
+    vertex: candidate.vertex,
+    kind: candidate.kind,
+    edge: { from: candidate.from, to: candidate.to },
+    forcedEdges: 0,
+    forcedWitnessDecisions: forcedDecisionCount
+  });
+  return true;
+}
+
 function applyVertexCoverDecisionCandidate(branch, candidate, graph, searchOptions) {
+  if (searchOptions.vertexCoverPropagation.witnessOnlyPropagation) {
+    return applyVertexCoverWitnessOnlyDecisionCandidate(branch, candidate, graph, searchOptions);
+  }
+
   if (!applyChosenEdge(candidate.from, candidate.to, graph.edge, branch.endpointLink, branch.state)) {
     branch.state.invalid = true;
     branch.state.invalidReason = `Vertex Cover witness choice ${vertexCoverDecisionLabel(candidate)} could not be applied.`;
@@ -3669,7 +4235,6 @@ function applyVertexCoverDecisionCandidate(branch, candidate, graph, searchOptio
     if (branch.state.invalid) return false;
     propagated.forcedEdgeCount += afterCapacity.forcedEdgeCount;
   }
-
   branch.decisions.push({
     vertex: candidate.vertex,
     kind: candidate.kind,
@@ -3718,6 +4283,7 @@ function runVertexCoverWitnessHcDecisionSearch(graph, vertexCount, coverLimit, e
 
   const meta = graph.vertexCoverPropagation;
   meta.coverLimit = coverLimit;
+  meta.vertexCount = vertexCount;
   const graphEdgeList = graph.allowedEdges || buildNonzeroEdgeList(graph.edge, graph.n);
   attachEdgeListAdjacency(graphEdgeList, graph.n);
   const vcDecisionCandidates = buildVertexCoverDecisionCandidates(graph, vertexCount);
@@ -3780,6 +4346,36 @@ function runVertexCoverWitnessHcDecisionSearch(graph, vertexCount, coverLimit, e
         break;
       }
 
+      const currentCover = currentVertexCoverWitnessCover(branch.state, vertexCount, coverLimit, edges);
+      if (currentCover) {
+        assignmentsChecked += 1;
+        const signature = currentCover.join(":");
+        if (!seenCovers.has(signature)) {
+          seenCovers.add(signature);
+          covers.push({
+            cover: currentCover,
+            decisions: branch.decisions.slice(),
+            chosenEdges: branch.state.chosenEdges ? branch.state.chosenEdges.slice() : []
+          });
+        }
+        break;
+      }
+
+      const targetWitnessCover = vertexCoverRejectedTargetWitnessCover(branch.state, meta, vertexCount, coverLimit, edges);
+      if (targetWitnessCover) {
+        assignmentsChecked += 1;
+        const signature = targetWitnessCover.join(":");
+        if (!seenCovers.has(signature)) {
+          seenCovers.add(signature);
+          covers.push({
+            cover: targetWitnessCover,
+            decisions: branch.decisions.slice(),
+            chosenEdges: branch.state.chosenEdges ? branch.state.chosenEdges.slice() : []
+          });
+        }
+        break;
+      }
+
       const remainingDecisions = currentVertexCoverDecisionCandidateEdges(vcDecisionCandidates, branch.state, graph, branch.endpointLink, coverLimit);
       if (remainingDecisions.length === 0) {
         assignmentsChecked += 1;
@@ -3811,11 +4407,17 @@ function runVertexCoverWitnessHcDecisionSearch(graph, vertexCount, coverLimit, e
       const ranked = rankScoringEdges(graph.n, graph.edge, null, branch.endpointLink, branch.state, betaInfo.beta, null, scoringOptions)
         .map(candidate => ({ ...candidate, vcDecision: currentDecisionByKey.get(edgeKey(candidate.from, candidate.to)) }))
         .filter(candidate => candidate.vcDecision);
+
+      const viableRanked = [];
       for (const candidate of ranked) {
         candidate.vcCoverageGain = vertexCoverDecisionCoverageGain(candidate.vcDecision, branch.state, edges, meta, coverLimit);
+        if (candidate.vcCoverageGain < 0) continue;
         candidate.vcAddedSelected = vertexCoverDecisionAddedSelectedCount(candidate.vcDecision, branch.state, meta);
         candidate.vcCoverageEfficiency = candidate.vcCoverageGain / Math.max(1, candidate.vcAddedSelected);
+        viableRanked.push(candidate);
       }
+      ranked.length = 0;
+      ranked.push(...viableRanked);
       ranked.sort((a, b) =>
         b.vcCoverageEfficiency - a.vcCoverageEfficiency ||
         b.vcCoverageGain - a.vcCoverageGain ||
@@ -3825,19 +4427,45 @@ function runVertexCoverWitnessHcDecisionSearch(graph, vertexCount, coverLimit, e
         break;
       }
 
-      const best = ranked[0];
-      const seenConsequences = new Set();
-      const preview = cloneVertexCoverDecisionBranch(branch);
-      if (applyVertexCoverDecisionCandidate(preview, best.vcDecision, graph, searchOptions)) {
-        seenConsequences.add(vertexCoverDecisionSignature(preview.state, vertexCount));
+      const branchBeforeDecision = cloneVertexCoverDecisionBranch(branch);
+      let appliedChoice = null;
+      let failedChoiceReason = "";
+      for (let optionIndex = 0; optionIndex < ranked.length; optionIndex++) {
+        const candidate = ranked[optionIndex];
+        const attempt = cloneVertexCoverDecisionBranch(branchBeforeDecision);
+        const applied =
+          applyVertexCoverDecisionCandidate(attempt, candidate.vcDecision, graph, searchOptions) &&
+          vertexCoverPartialWitnessValid(attempt.state, coverLimit, edges);
+        if (!applied) {
+          failedChoiceReason = attempt.state.invalidReason || "Vertex Cover witness choice became invalid";
+          continue;
+        }
+        branch.endpointLink = attempt.endpointLink;
+        branch.state = attempt.state;
+        branch.decisions = attempt.decisions;
+        branch.lastAdaptiveBeta = attempt.lastAdaptiveBeta;
+        appliedChoice = {
+          candidate,
+          optionIndex,
+          signature: vertexCoverDecisionSignature(branch.state, vertexCount)
+        };
+        break;
+      }
+
+      if (!appliedChoice) {
+        bestFailureReason = failedChoiceReason || "no remaining Vertex Cover witness decision could be applied";
+        break;
       }
 
       const hasBacktrackRoom = explored + queue.length < branchLimit;
       if (hasBacktrackRoom) {
+        const best = appliedChoice.candidate;
+        const seenConsequences = new Set([appliedChoice.signature]);
         const alternativesToKeep = shouldStopAtFirstHcTour() ? 2 : ranked.length;
-        for (let optionIndex = 1; optionIndex < ranked.length && explored + queue.length < branchLimit; optionIndex++) {
+        for (let optionIndex = 0; optionIndex < ranked.length && explored + queue.length < branchLimit; optionIndex++) {
+          if (optionIndex === appliedChoice.optionIndex) continue;
           const candidate = ranked[optionIndex];
-          const alternative = prepareVertexCoverDecisionAlternative(branch, { candidate, vcDecision: candidate.vcDecision, best, optionIndex }, graph, searchOptions, edges);
+          const alternative = prepareVertexCoverDecisionAlternative(branchBeforeDecision, { candidate, vcDecision: candidate.vcDecision, best, optionIndex }, graph, searchOptions, edges);
           if (!alternative) continue;
           const signature = vertexCoverDecisionSignature(alternative.state, vertexCount);
           if (seenConsequences.has(signature) || seenQueued.has(signature)) continue;
@@ -3847,11 +4475,6 @@ function runVertexCoverWitnessHcDecisionSearch(graph, vertexCount, coverLimit, e
           queued += 1;
           if (seenConsequences.size > alternativesToKeep) break;
         }
-      }
-
-      if (!applyVertexCoverDecisionCandidate(branch, best.vcDecision, graph, searchOptions)) {
-        bestFailureReason = branch.state.invalidReason || "Vertex Cover witness choice became invalid";
-        break;
       }
     }
 
@@ -5151,46 +5774,85 @@ function appendSatViaVertexCoverHcReduction(lines, prepared, sourceLabel, answer
 
 function runVertexCover(text) {
   const { n, k, padding, edges } = parseVertexCover(text);
-  const graph = buildDirectVertexCoverHcGraph(n, k, edges, padding);
-
   const lines = [];
-  appendVertexCoverWitnessHcReduction(lines, graph, n, k, normalizeUndirectedEdges(n, edges), "Vertex Cover", "YES", "NO", search => {
+  const reduced = reduceVertexCoverBySafeRules(n, k, edges);
+
+  if (reduced.impossible) {
+    append(lines, "Final answer:");
+    append(lines, "Vertex Cover answer inferred before HC witness choices: NO");
+    append(lines, `reason = ${reduced.impossibleReason}`);
+    append(lines);
+    append(lines, "Run summary:");
+    append(lines, `VC exact precheck forced vertices = ${reduced.forcedCover.length}`);
+    append(lines, `VC exact precheck removed isolated vertices = ${reduced.removedIsolated}`);
+    append(lines, `VC matching lower bound = ${reduced.matchingLowerBound}`);
+    return lines.join("\n");
+  }
+
+  const graph = buildDirectVertexCoverHcGraph(reduced.n, reduced.k, reduced.edges, padding);
+
+  appendVertexCoverWitnessHcReduction(lines, graph, reduced.n, reduced.k, reduced.edges, "Vertex Cover", "YES", "NO", search => {
     const limit = witnessDisplayLimit();
-    const covers = search.covers.slice(0, limit).map(item => item.cover);
+    const covers = search.covers.slice(0, limit).map(item => {
+      const mapped = item.cover
+        .map(vertex => reduced.vertexMap[vertex - 1])
+        .filter(vertex => vertex !== undefined);
+      return reduced.forcedCover.concat(mapped).sort((a, b) => a - b);
+    });
     if (covers.length === 0) return ["vertex cover witness unavailable even though HC returned YES"];
     return [
       `vertex covers shown = ${covers.length} / found ${search.covers.length}`,
       ...covers.map((cover, index) => `${index + 1}. vertex cover = ${formatSet(cover)}; cover size = ${cover.length} / k=${k}`)
     ];
   });
+  if (reduced.forcedCover.length > 0 || reduced.removedIsolated > 0 || reduced.n !== n) {
+    append(lines, `VC exact precheck forced vertices = ${reduced.forcedCover.length}; removed isolated vertices = ${reduced.removedIsolated}; reduced vertices = ${reduced.n} / original ${n}; remaining k = ${reduced.k}`);
+  }
   return lines.join("\n");
 }
 
 function runClique(text) {
   const { n, k, padding, edges } = parseClique(text);
-  const complementEdges = buildComplementEdges(n, edges);
-  const vertexCoverK = n - k;
-  const graph = vertexCoverK >= 0 ? buildDirectVertexCoverHcGraph(n, vertexCoverK, complementEdges, padding) : null;
+  const reduced = reduceCliqueByCore(n, k, edges);
+  const complementEdges = buildComplementEdges(reduced.n, reduced.edges);
+  const vertexCoverK = reduced.n - k;
+  const graph = vertexCoverK >= 0 ? buildDirectVertexCoverHcGraph(reduced.n, vertexCoverK, complementEdges, padding) : null;
   if (graph && graph.vertexCoverPropagation) {
     graph.vertexCoverPropagation.witnessKind = "clique";
     graph.vertexCoverPropagation.witnessTargetSize = k;
+    graph.vertexCoverPropagation.witnessOnlyPropagation = true;
   }
 
   const lines = [];
   if (!graph) {
     append(lines, "Final answer:");
     append(lines, "Clique answer: NO");
-    append(lines, `k = ${k} is larger than the vertex count ${n}`);
+    append(lines, reduced.n < k
+      ? `Only ${reduced.n} vertices survived the exact k-core clique precheck, fewer than k=${k}.`
+      : `k = ${k} is larger than the vertex count ${n}`);
     return lines.join("\n");
   }
 
-  appendVertexCoverWitnessHcReduction(lines, graph, n, vertexCoverK, complementEdges, "Clique", "YES", "NO", search => {
+  appendVertexCoverWitnessHcReduction(lines, graph, reduced.n, vertexCoverK, complementEdges, "Clique", "YES", "NO", search => {
     const limit = witnessDisplayLimit();
+    const activeOriginalVertices = new Set(reduced.vertexMap);
+    const prunedCoverVertices = [];
+    for (let vertex = 1; vertex <= n; vertex++) {
+      if (!activeOriginalVertices.has(vertex)) prunedCoverVertices.push(vertex);
+    }
     const cliques = search.covers.slice(0, limit).map(item => {
       const coverSet = new Set(item.cover);
       const clique = [];
-      for (let vertex = 1; vertex <= n; vertex++) if (!coverSet.has(vertex)) clique.push(vertex);
-      return { clique, cover: item.cover };
+      for (let vertex = 1; vertex <= reduced.n; vertex++) {
+        if (!coverSet.has(vertex)) clique.push(reduced.vertexMap[vertex - 1]);
+      }
+      const mappedCover = item.cover
+        .map(vertex => reduced.vertexMap[vertex - 1])
+        .filter(vertex => vertex !== undefined);
+      return {
+        clique,
+        cover: mappedCover.concat(prunedCoverVertices).sort((a, b) => a - b)
+      };
     });
     if (cliques.length === 0) return ["clique witness unavailable even though HC returned YES"];
     return [
@@ -5200,29 +5862,53 @@ function runClique(text) {
       })
     ];
   });
+  if (reduced.removed > 0) {
+    append(lines, `Clique exact precheck removed vertices = ${reduced.removed}; reduced vertices = ${reduced.n} / original ${n}`);
+  }
   return lines.join("\n");
 }
 
 function runIndependentSet(text) {
   const { n, k, padding, edges } = parseIndependentSet(text);
-  const vertexCoverK = n - k;
-  const graph = vertexCoverK >= 0 ? buildDirectVertexCoverHcGraph(n, vertexCoverK, edges, padding) : null;
+  const reduced = reduceIndependentSetByCore(n, k, edges);
+  const vertexCoverK = reduced.n - k;
+  const graph = vertexCoverK >= 0 ? buildDirectVertexCoverHcGraph(reduced.n, vertexCoverK, reduced.edges, padding) : null;
+  if (graph && graph.vertexCoverPropagation) {
+    graph.vertexCoverPropagation.witnessKind = "independentSet";
+    graph.vertexCoverPropagation.witnessTargetSize = k;
+    graph.vertexCoverPropagation.witnessOnlyPropagation = true;
+  }
 
   const lines = [];
   if (!graph) {
     append(lines, "Final answer:");
     append(lines, "Independent Set answer: NO");
-    append(lines, `k = ${k} is larger than the vertex count ${n}`);
+    append(lines, reduced.n < k
+      ? `Only ${reduced.n} vertices survived the exact independent-set core precheck, fewer than k=${k}.`
+      : `k = ${k} is larger than the vertex count ${n}`);
     return lines.join("\n");
   }
 
-  appendVertexCoverWitnessHcReduction(lines, graph, n, vertexCoverK, edges, "Independent Set", "YES", "NO", search => {
+  appendVertexCoverWitnessHcReduction(lines, graph, reduced.n, vertexCoverK, reduced.edges, "Independent Set", "YES", "NO", search => {
     const limit = witnessDisplayLimit();
+    const activeOriginalVertices = new Set(reduced.vertexMap);
+    const prunedCoverVertices = [];
+    for (let vertex = 1; vertex <= n; vertex++) {
+      if (!activeOriginalVertices.has(vertex)) prunedCoverVertices.push(vertex);
+    }
     const independentSets = search.covers.slice(0, limit).map(item => {
       const coverSet = new Set(item.cover);
       const independent = [];
-      for (let vertex = 1; vertex <= n; vertex++) if (!coverSet.has(vertex)) independent.push(vertex);
-      return { independent, cover: item.cover };
+      for (let vertex = 1; vertex <= reduced.n; vertex++) {
+        if (!coverSet.has(vertex)) independent.push(reduced.vertexMap[vertex - 1]);
+      }
+      const mappedCover = item.cover
+        .map(vertex => reduced.vertexMap[vertex - 1])
+        .filter(vertex => vertex !== undefined);
+      return {
+        independent,
+        cover: mappedCover.concat(prunedCoverVertices).sort((a, b) => a - b)
+      };
     });
     if (independentSets.length === 0) return ["independent set witness unavailable even though HC returned YES"];
     return [
@@ -5232,20 +5918,60 @@ function runIndependentSet(text) {
       })
     ];
   });
+  if (reduced.removed > 0) {
+    append(lines, `Independent Set exact precheck removed vertices = ${reduced.removed}; reduced vertices = ${reduced.n} / original ${n}`);
+  }
   return lines.join("\n");
 }
 
 function runSetCover(text) {
   const { universeSize, setCount, k, padding, sets } = parseSetCover(text);
-  const sat = setCoverTo3Sat(universeSize, setCount, k, sets);
-  const prepared = prepareSatViaVertexCoverForHc(sat, padding);
-
+  const reduced = reduceSetCoverBySafeRules(universeSize, k, sets);
   const lines = [];
+
+  if (reduced.impossible) {
+    append(lines, "Final answer:");
+    append(lines, "Set Cover answer inferred before HC witness choices: NO");
+    append(lines, `reason = ${reduced.impossibleReason}`);
+    append(lines);
+    append(lines, "Run summary:");
+    append(lines, `Set Cover exact precheck forced sets = ${reduced.forcedSets.length}`);
+    append(lines, `Set Cover reduced universe size = ${reduced.universeSize} / original ${universeSize}`);
+    return lines.join("\n");
+  }
+
+  if (reduced.universeSize === 0) {
+    append(lines, "Final answer:");
+    append(lines, "Set Cover answer inferred before HC witness choices: YES");
+    append(lines);
+    append(lines, "Witnesses inferred from exact precheck:");
+    append(lines, `1. selected set indices = ${formatSet(reduced.forcedSets)}; ${formatSetCoverWitness(reduced.forcedSets, sets)}; sets selected = ${reduced.forcedSets.length} / k=${k}`);
+    append(lines);
+    append(lines, "Run summary:");
+    append(lines, `Set Cover exact precheck forced sets = ${reduced.forcedSets.length}`);
+    append(lines, `Set Cover reduced universe size = 0 / original ${universeSize}`);
+    return lines.join("\n");
+  }
+
+  if (reduced.setCount === 0) {
+    append(lines, "Final answer:");
+    append(lines, "Set Cover answer inferred before HC witness choices: NO");
+    append(lines, "reason = no remaining set covers an uncovered element");
+    return lines.join("\n");
+  }
+
+  const sat = setCoverTo3Sat(reduced.universeSize, reduced.setCount, reduced.k, reduced.sets);
+  const prepared = prepareSatViaVertexCoverForHc(sat, padding);
   appendSatViaVertexCoverHcReduction(lines, prepared, "Set Cover via 3-SAT -> Vertex Cover -> direct HC", "Set Cover", "YES", "NO", search => {
     const limit = witnessDisplayLimit();
     const covers = search.satisfyingAssignments
       .slice(0, limit)
-      .map(item => selectedTrueVariables(item.decisionAssignment || item.assignment, setCount));
+      .map(item => {
+        const selected = selectedTrueVariables(item.decisionAssignment || item.assignment, reduced.setCount)
+          .map(index => reduced.setMap[index - 1])
+          .filter(index => index !== undefined);
+        return reduced.forcedSets.concat(selected).sort((a, b) => a - b);
+      });
     if (covers.length === 0) return ["set cover witness unavailable even though HC returned YES"];
     return [
       `set covers shown = ${covers.length} / found ${search.satisfyingAssignments.length}`,
@@ -5254,34 +5980,74 @@ function runSetCover(text) {
   }, {
     formulaVariableCount: sat.variableCount,
     formulaClauses: sat.clauses,
-    decisionVariableCount: setCount,
-    assignmentValidator: assignment => setCoverAssignmentValid(assignment, universeSize, k, sets),
-    partialAssignmentValidator: assignment => selectedTrueVariables(assignment, setCount).length <= k,
+    decisionVariableCount: reduced.setCount,
+    assignmentValidator: assignment => setCoverAssignmentValid(assignment, reduced.universeSize, reduced.k, reduced.sets),
+    partialAssignmentValidator: assignment => selectedTrueVariables(assignment, reduced.setCount).length <= reduced.k,
     forcedDecisionsAfterChoice: (candidate, assignment) => {
       if (candidate.value !== 1) return [];
-      if (selectedTrueVariables(assignment, setCount).length < k) return [];
+      if (selectedTrueVariables(assignment, reduced.setCount).length < reduced.k) return [];
       const forced = [];
-      for (let setIndex = 1; setIndex <= setCount; setIndex++) {
+      for (let setIndex = 1; setIndex <= reduced.setCount; setIndex++) {
         if (assignment[setIndex] === -1) forced.push({ variable: setIndex, value: 0 });
       }
       return forced;
     }
   });
+  if (reduced.forcedSets.length > 0 || reduced.universeSize !== universeSize || reduced.setCount !== setCount) {
+    append(lines, `Set Cover exact precheck forced sets = ${reduced.forcedSets.length}; reduced universe size = ${reduced.universeSize} / original ${universeSize}; reduced set count = ${reduced.setCount} / original ${setCount}; remaining k = ${reduced.k}`);
+  }
   return lines.join("\n");
 }
 
 function runX3c(text) {
   const { universeSize, setCount, padding, sets } = parseX3c(text);
-  const sat = x3cTo3Sat(universeSize, setCount, sets);
-  const prepared = prepareSatViaVertexCoverForHc(sat, padding);
+  const reduced = reduceX3cBySafeRules(universeSize, sets);
+  const lines = [];
   const targetSetCount = universeSize % 3 === 0 ? universeSize / 3 : "not integral";
 
-  const lines = [];
+  if (reduced.impossible) {
+    append(lines, "Final answer:");
+    append(lines, "X3C answer inferred before HC witness choices: NO");
+    append(lines, `reason = ${reduced.impossibleReason}`);
+    append(lines);
+    append(lines, "Run summary:");
+    append(lines, `X3C exact precheck forced sets = ${reduced.forcedSets.length}`);
+    append(lines, `X3C reduced universe size = ${reduced.universeSize} / original ${universeSize}`);
+    return lines.join("\n");
+  }
+
+  if (reduced.universeSize === 0) {
+    append(lines, "Final answer:");
+    append(lines, "X3C answer inferred before HC witness choices: YES");
+    append(lines);
+    append(lines, "Witnesses inferred from exact precheck:");
+    append(lines, `1. selected 3-set indices = ${formatSet(reduced.forcedSets)}; ${formatSetCoverWitness(reduced.forcedSets, sets)}; sets selected = ${reduced.forcedSets.length} / target=${targetSetCount}`);
+    append(lines);
+    append(lines, "Run summary:");
+    append(lines, `X3C exact precheck forced sets = ${reduced.forcedSets.length}`);
+    append(lines, `X3C reduced universe size = 0 / original ${universeSize}`);
+    return lines.join("\n");
+  }
+
+  if (reduced.setCount === 0) {
+    append(lines, "Final answer:");
+    append(lines, "X3C answer inferred before HC witness choices: NO");
+    append(lines, "reason = no remaining 3-set covers an uncovered element");
+    return lines.join("\n");
+  }
+
+  const sat = x3cTo3Sat(reduced.universeSize, reduced.setCount, reduced.sets);
+  const prepared = prepareSatViaVertexCoverForHc(sat, padding);
   appendSatViaVertexCoverHcReduction(lines, prepared, "X3C via 3-SAT -> Vertex Cover -> direct HC", "X3C", "YES", "NO", search => {
     const limit = witnessDisplayLimit();
     const exactCovers = search.satisfyingAssignments
       .slice(0, limit)
-      .map(item => selectedTrueVariables(item.decisionAssignment || item.assignment, setCount));
+      .map(item => {
+        const selected = selectedTrueVariables(item.decisionAssignment || item.assignment, reduced.setCount)
+          .map(index => reduced.setMap[index - 1])
+          .filter(index => index !== undefined);
+        return reduced.forcedSets.concat(selected).sort((a, b) => a - b);
+      });
     if (exactCovers.length === 0) return ["exact cover witness unavailable even though HC returned YES"];
     return [
       `exact covers shown = ${exactCovers.length} / found ${search.satisfyingAssignments.length}`,
@@ -5290,29 +6056,209 @@ function runX3c(text) {
   }, {
     formulaVariableCount: sat.variableCount,
     formulaClauses: sat.clauses,
-    decisionVariableCount: setCount,
-    assignmentValidator: assignment => x3cAssignmentValid(assignment, universeSize, sets),
-    partialAssignmentValidator: assignment => universeSize % 3 === 0 && selectedTrueVariables(assignment, setCount).length <= universeSize / 3,
+    decisionVariableCount: reduced.setCount,
+    assignmentValidator: assignment => x3cAssignmentValid(assignment, reduced.universeSize, reduced.sets),
+    partialAssignmentValidator: assignment => reduced.universeSize % 3 === 0 && selectedTrueVariables(assignment, reduced.setCount).length <= reduced.universeSize / 3,
     forcedDecisionsAfterChoice: (candidate, assignment) => {
       if (candidate.value !== 1) return [];
-      const chosenSet = sets[candidate.variable - 1] || [];
+      const chosenSet = reduced.sets[candidate.variable - 1] || [];
       const chosenElements = new Set(chosenSet);
       const forced = [];
-      for (let setIndex = 1; setIndex <= setCount; setIndex++) {
+      for (let setIndex = 1; setIndex <= reduced.setCount; setIndex++) {
         if (setIndex === candidate.variable) continue;
-        if ((sets[setIndex - 1] || []).some(element => chosenElements.has(element))) {
+        if ((reduced.sets[setIndex - 1] || []).some(element => chosenElements.has(element))) {
           forced.push({ variable: setIndex, value: 0 });
         }
       }
-      if (universeSize % 3 === 0 && selectedTrueVariables(assignment, setCount).length >= universeSize / 3) {
-        for (let setIndex = 1; setIndex <= setCount; setIndex++) {
+      if (reduced.universeSize % 3 === 0 && selectedTrueVariables(assignment, reduced.setCount).length >= reduced.universeSize / 3) {
+        for (let setIndex = 1; setIndex <= reduced.setCount; setIndex++) {
           if (assignment[setIndex] === -1) forced.push({ variable: setIndex, value: 0 });
         }
       }
       return forced;
     }
   });
+  if (reduced.forcedSets.length > 0 || reduced.universeSize !== universeSize || reduced.setCount !== setCount) {
+    append(lines, `X3C exact precheck forced sets = ${reduced.forcedSets.length}; reduced universe size = ${reduced.universeSize} / original ${universeSize}; reduced set count = ${reduced.setCount} / original ${setCount}`);
+  }
   return lines.join("\n");
+}
+
+function reduceGraphColoringBySafeRules(n, colorCount, edges) {
+  const normalized = normalizeUndirectedEdges(n, edges);
+  const coloring = Array(n + 1).fill(0);
+  if (normalized.length === 0) {
+    for (let vertex = 1; vertex <= n; vertex++) coloring[vertex] = 1;
+    return {
+      solved: true,
+      answer: true,
+      coloring,
+      reason: "graph has no edges",
+      n,
+      edges: normalized,
+      vertexMap: Array.from({ length: n }, (_, index) => index + 1),
+      peeled: 0
+    };
+  }
+
+  if (colorCount === 1) {
+    return {
+      solved: true,
+      answer: false,
+      coloring: null,
+      reason: "a graph with at least one edge cannot be colored with 1 color",
+      n,
+      edges: normalized,
+      vertexMap: Array.from({ length: n }, (_, index) => index + 1),
+      peeled: 0
+    };
+  }
+
+  const adjacency = Array.from({ length: n + 1 }, () => new Set());
+  for (const [u, v] of normalized) {
+    adjacency[u].add(v);
+    adjacency[v].add(u);
+  }
+
+  if (colorCount === 2) {
+    for (let start = 1; start <= n; start++) {
+      if (coloring[start]) continue;
+      coloring[start] = 1;
+      const queue = [start];
+      for (let index = 0; index < queue.length; index++) {
+        const vertex = queue[index];
+        const nextColor = coloring[vertex] === 1 ? 2 : 1;
+        for (const neighbor of adjacency[vertex]) {
+          if (!coloring[neighbor]) {
+            coloring[neighbor] = nextColor;
+            queue.push(neighbor);
+          } else if (coloring[neighbor] === coloring[vertex]) {
+            return {
+              solved: true,
+              answer: false,
+              coloring: null,
+              reason: `edge ${vertex}-${neighbor} creates an odd-cycle conflict for 2 colors`,
+              n,
+              edges: normalized,
+              vertexMap: Array.from({ length: n }, (_, index) => index + 1),
+              peeled: 0
+            };
+          }
+        }
+      }
+    }
+    return {
+      solved: true,
+      answer: true,
+      coloring,
+      reason: "graph is bipartite",
+      n,
+      edges: normalized,
+      vertexMap: Array.from({ length: n }, (_, index) => index + 1),
+      peeled: 0
+    };
+  }
+
+  const active = Array(n + 1).fill(true);
+  active[0] = false;
+  const removedOrder = [];
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (let vertex = 1; vertex <= n; vertex++) {
+      if (!active[vertex]) continue;
+      let activeDegree = 0;
+      for (const neighbor of adjacency[vertex]) if (active[neighbor]) activeDegree += 1;
+      if (activeDegree < colorCount) {
+        active[vertex] = false;
+        removedOrder.push(vertex);
+        changed = true;
+      }
+    }
+  }
+
+  const vertexMap = [];
+  const remap = Array(n + 1).fill(0);
+  for (let vertex = 1; vertex <= n; vertex++) {
+    if (!active[vertex]) continue;
+    remap[vertex] = vertexMap.length + 1;
+    vertexMap.push(vertex);
+  }
+
+  if (vertexMap.length === 0) {
+    const solvedColoring = Array(n + 1).fill(0);
+    for (let orderIndex = removedOrder.length - 1; orderIndex >= 0; orderIndex--) {
+      const vertex = removedOrder[orderIndex];
+      const blocked = new Set();
+      for (const neighbor of adjacency[vertex]) {
+        if (solvedColoring[neighbor]) blocked.add(solvedColoring[neighbor]);
+      }
+      for (let candidateColor = 1; candidateColor <= colorCount; candidateColor++) {
+        if (!blocked.has(candidateColor)) {
+          solvedColoring[vertex] = candidateColor;
+          break;
+        }
+      }
+    }
+    return {
+      solved: true,
+      answer: true,
+      coloring: solvedColoring,
+      reason: `graph is ${colorCount - 1}-degenerate or better`,
+      n: 0,
+      edges: [],
+      vertexMap,
+      removedOrder,
+      peeled: removedOrder.length
+    };
+  }
+
+  const reducedEdges = [];
+  for (const [u, v] of normalized) {
+    if (!active[u] || !active[v]) continue;
+    reducedEdges.push([remap[u], remap[v]]);
+  }
+
+  return {
+    solved: false,
+    answer: null,
+    coloring: null,
+    reason: "",
+    n: vertexMap.length,
+    edges: reducedEdges,
+    vertexMap,
+    removedOrder,
+    peeled: removedOrder.length
+  };
+}
+
+function extendGraphColoringFromCore(coreColoring, reduced, originalN, colorCount, originalEdges) {
+  const coloring = Array(originalN + 1).fill(0);
+  for (let vertex = 1; vertex <= reduced.n; vertex++) {
+    coloring[reduced.vertexMap[vertex - 1]] = coreColoring[vertex];
+  }
+
+  const adjacency = Array.from({ length: originalN + 1 }, () => []);
+  for (const [u, v] of normalizeUndirectedEdges(originalN, originalEdges)) {
+    adjacency[u].push(v);
+    adjacency[v].push(u);
+  }
+
+  for (let orderIndex = (reduced.removedOrder || []).length - 1; orderIndex >= 0; orderIndex--) {
+    const vertex = reduced.removedOrder[orderIndex];
+    const blocked = new Set();
+    for (const neighbor of adjacency[vertex]) {
+      if (coloring[neighbor]) blocked.add(coloring[neighbor]);
+    }
+    for (let candidateColor = 1; candidateColor <= colorCount; candidateColor++) {
+      if (!blocked.has(candidateColor)) {
+        coloring[vertex] = candidateColor;
+        break;
+      }
+    }
+    if (!coloring[vertex]) return null;
+  }
+  return coloring;
 }
 
 function graphColorName(index) {
@@ -5322,15 +6268,33 @@ function graphColorName(index) {
 
 function runGraphColoring(text) {
   const { n, declaredEdgeCount, colorCount, padding, edges } = parseGraphColoring(text);
-  const sat = graphColoringTo3Sat(n, colorCount, edges);
+  const reduced = reduceGraphColoringBySafeRules(n, colorCount, edges);
+  const lines = [];
+
+  if (reduced.solved) {
+    append(lines, "Final answer:");
+    append(lines, `Graph Coloring answer inferred before HC witness choices: ${reduced.answer ? "YES" : "NO"}`);
+    if (reduced.reason) append(lines, `reason = ${reduced.reason}`);
+    if (reduced.answer && reduced.coloring) {
+      append(lines);
+      append(lines, "Witnesses inferred from exact precheck:");
+      append(lines, `1. coloring = ${formatGraphColoringWitness(reduced.coloring, n)}; colors used = ${formatSet(Array.from(new Set(reduced.coloring.slice(1))).sort((a, b) => a - b).map(graphColorName))}`);
+    }
+    append(lines);
+    append(lines, "Run summary:");
+    append(lines, `Graph Coloring exact precheck peeled vertices = ${reduced.peeled || 0}; reduced vertices = ${reduced.n} / original ${n}`);
+    return lines.join("\n");
+  }
+
+  const sat = graphColoringTo3Sat(reduced.n, colorCount, reduced.edges);
   const prepared = prepareSatViaVertexCoverForHc(sat, padding);
 
-  const lines = [];
   appendSatViaVertexCoverHcReduction(lines, prepared, "Graph Coloring via 3-SAT -> Vertex Cover -> direct HC", "Graph Coloring", "YES", "NO", search => {
     const limit = witnessDisplayLimit();
     const colorings = search.satisfyingAssignments
       .slice(0, limit)
-      .map(item => graphColorFromAssignment(item.decisionAssignment || item.assignment, n, colorCount))
+      .map(item => graphColorFromAssignment(item.decisionAssignment || item.assignment, reduced.n, colorCount))
+      .map(color => color ? extendGraphColoringFromCore(color, reduced, n, colorCount, edges) : null)
       .filter(Boolean);
     if (colorings.length === 0) return ["coloring witness unavailable even though HC returned YES"];
     return [
@@ -5340,17 +6304,17 @@ function runGraphColoring(text) {
   }, {
     formulaVariableCount: sat.variableCount,
     formulaClauses: sat.clauses,
-    decisionVariableCount: n * colorCount,
-    assignmentValidator: assignment => graphColorAssignmentValid(assignment, n, colorCount, edges),
+    decisionVariableCount: reduced.n * colorCount,
+    assignmentValidator: assignment => graphColorAssignmentValid(assignment, reduced.n, colorCount, reduced.edges),
     partialAssignmentValidator: assignment => {
-      for (let vertex = 1; vertex <= n; vertex++) {
+      for (let vertex = 1; vertex <= reduced.n; vertex++) {
         let trueCount = 0;
         for (let candidateColor = 1; candidateColor <= colorCount; candidateColor++) {
           if (assignment[colorCount * (vertex - 1) + candidateColor] === 1) trueCount += 1;
         }
         if (trueCount > 1) return false;
       }
-      for (const [u, v] of edges) {
+      for (const [u, v] of reduced.edges) {
         for (let candidateColor = 1; candidateColor <= colorCount; candidateColor++) {
           if (assignment[colorCount * (u - 1) + candidateColor] === 1 &&
               assignment[colorCount * (v - 1) + candidateColor] === 1) return false;
@@ -5371,6 +6335,9 @@ function runGraphColoring(text) {
       return forced;
     }
   });
+  if (reduced.peeled > 0 || reduced.n !== n) {
+    append(lines, `Graph Coloring exact precheck peeled vertices = ${reduced.peeled}; reduced vertices = ${reduced.n} / original ${n}`);
+  }
   return lines.join("\n");
 }
 
@@ -6174,6 +7141,16 @@ function compactRunOutput(text, elapsedMs) {
     /^SAT witness branches explored = /,
     /^SAT witness branch limit = /,
     /^SAT assignments checked = /,
+    /^Clique exact precheck removed vertices = /,
+    /^Independent Set exact precheck removed vertices = /,
+    /^VC exact precheck forced vertices = /,
+    /^VC exact precheck removed isolated vertices = /,
+    /^VC matching lower bound = /,
+    /^Set Cover exact precheck forced sets = /,
+    /^Set Cover reduced universe size = /,
+    /^X3C exact precheck forced sets = /,
+    /^X3C reduced universe size = /,
+    /^Graph Coloring exact precheck peeled vertices = /,
     /^VC decision vertices checked = /,
     /^VC witness choices scored = /,
     /^VC witness branches explored = /,
