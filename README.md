@@ -147,7 +147,6 @@ H(\tau)^2
 ```
 
 ```math
-H(\tau)^2
 =
 \sum_{e \in E} w_e^2 X_e(\tau)
 +
