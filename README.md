@@ -45,10 +45,16 @@ The variance uses edge-pair counting instead of tour enumeration. Here $S_2$ is 
 - \mu^2
 ```
 
-After some edges are committed, the app recomputes the same kind of statistics for the constrained Hamiltonian ensemble. Let $q_C$ be the number of committed path components and let $V_C$ be the vertices touched by those components:
+After some edges are committed, the app recomputes the same kind of statistics for the constrained Hamiltonian ensemble. Let $Q_C$ be the total weight already committed, $q_C$ be the number of open committed path components, and $V_C$ be the vertices touched by those components. The remaining completion factor is:
 
 ```math
-\Omega_C = 2^{q_C - 1}(n - 1 + q_C - |V_C|)!
+r_C = n - 1 + q_C - |V_C|
+```
+
+The constrained count is:
+
+```math
+\Omega_C = 2^{q_C - 1}r_C!
 ```
 
 The count entropy is:
@@ -57,18 +63,46 @@ The count entropy is:
 S_C = \ln \Omega_C
 ```
 
-For the compatible tour ensemble $H_C$, the constrained mean and variance are:
+The app divides remaining candidate edges into three buckets:
+
+- $OO$: open endpoint to open endpoint
+- $OF$: open endpoint to free vertex
+- $FF$: free vertex to free vertex
+
+Let $B_{OO}$, $B_{OF}$, and $B_{FF}$ be the weight sums in those buckets. Let $B_{OO}^{(2)}$, $B_{OF}^{(2)}$, and $B_{FF}^{(2)}$ be the squared-weight sums. The constrained mean used by the solver is:
 
 ```math
 \mu_C =
-\frac{1}{\Omega_C}
-\sum_{T \in H_C} w(T)
+Q_C
++ \frac{1}{2r_C}B_{OO}
++ \frac{1}{r_C}B_{OF}
++ \frac{2}{r_C}B_{FF}
 ```
+
+For the constrained variance, the app uses the same idea as the general variance formula, but with pair buckets that respect the already committed chains. Let:
+
+```math
+R_C =
+\frac{1}{2}P_{OO}
++ P_{OF,T}
++ 2P_{OF,D}
++ 4P_{FF,T}
++ 8P_{FF,D}
++ P_{OO,OF,T}
++ 2P_{OO,FF}
++ 2P_{OF,FF,T}
++ 4P_{OF,FF,D}
+```
+
+Each $P$ term is a sum of products $w_e w_f$ over compatible unordered edge pairs. $T$ means the two edges touch, and $D$ means they are disjoint. For example, $P_{OF,T}$ is the touching-pair sum for two open-free edges, $P_{FF,D}$ is the disjoint-pair sum for two free-free edges, and $P_{OF,FF,T}$ is the touching-pair sum for one open-free edge paired with one free-free edge. These are the constrained versions of the general touching and disjoint pair sums. The constrained variance is:
 
 ```math
 \sigma_C^2 =
-\frac{1}{\Omega_C}
-\sum_{T \in H_C} (w(T) - \mu_C)^2
+\frac{1}{2r_C}B_{OO}^{(2)}
++ \frac{1}{r_C}B_{OF}^{(2)}
++ \frac{2}{r_C}B_{FF}^{(2)}
++ \frac{1}{r_C(r_C - 1)}R_C
+- (\mu_C - Q_C)^2
 ```
 
 The partition approximation used for scoring is:
@@ -97,24 +131,6 @@ and commits it:
 
 ```math
 CE_{t+1} = CE_t \cup \{e_t^*\}
-```
-
-The displayed edge probabilities are normalized from the current scores:
-
-```math
-p_t(e) =
-\frac{\exp(I_t(e) - M_t)}
-{\sum_{f \in A_t}\exp(I_t(f) - M_t)}
-```
-
-```math
-M_t = \max_{f \in A_t} I_t(f)
-```
-
-The probability entropy of that choice distribution is:
-
-```math
-H_t = -\sum_{e \in A_t} p_t(e)\ln p_t(e)
 ```
 
 For reduction tabs, the final Hamiltonian witness is translated back into the original problem. For example, a Clique reduction displays the inferred clique, not just an HC tour.
