@@ -2500,98 +2500,13 @@ function satUnitForcedDecisionsFromAssignment(clauses, assignment) {
   return { valid: true, forcedDecisions, reason: "" };
 }
 
-function chooseUnassignedSatVariableForSearch(clauses, assignment, variableCount) {
-  let bestClause = null;
-  let bestOpenCount = Infinity;
-
-  for (const clause of clauses) {
-    let satisfied = false;
-    let openCount = 0;
-    for (const literal of clause) {
-      const variable = Math.abs(literal);
-      if (assignment[variable] === -1 || assignment[variable] === undefined) {
-        openCount += 1;
-      } else if (literalIsTrue(literal, assignment)) {
-        satisfied = true;
-        break;
-      }
-    }
-    if (satisfied) continue;
-    if (openCount === 0) return { contradiction: true, variable: 0, preferredValue: 1 };
-    if (openCount < bestOpenCount) {
-      bestOpenCount = openCount;
-      bestClause = clause;
-      if (openCount === 1) break;
-    }
-  }
-
-  if (!bestClause) return { contradiction: false, variable: 0, preferredValue: 1 };
-  for (const literal of bestClause) {
-    const variable = Math.abs(literal);
-    if (variable < 1 || variable > variableCount) continue;
-    if (assignment[variable] === -1 || assignment[variable] === undefined) {
-      return { contradiction: false, variable, preferredValue: literal > 0 ? 1 : 0 };
-    }
-  }
-  return { contradiction: true, variable: 0, preferredValue: 1 };
-}
-
-function satExactExtensionStatus(variableCount, clauses, assignment, maxNodes) {
-  let nodes = 0;
-  let exceeded = false;
-
-  const search = current => {
-    nodes += 1;
-    if (nodes > maxNodes) {
-      exceeded = true;
-      return false;
-    }
-
-    const propagated = propagateSatUnitsIntoAssignment(clauses, current);
-    if (!propagated.valid) return false;
-
-    const choice = chooseUnassignedSatVariableForSearch(clauses, current, variableCount);
-    if (choice.contradiction) return false;
-    if (choice.variable === 0) return true;
-
-    const first = choice.preferredValue;
-    const second = first === 1 ? 0 : 1;
-    for (const value of [first, second]) {
-      const next = current.slice();
-      next[choice.variable] = value;
-      if (search(next)) return true;
-      if (exceeded) return false;
-    }
-    return false;
-  };
-
-  const canExtend = search(assignment.slice());
-  return {
-    known: !exceeded,
-    canExtend: canExtend && !exceeded,
-    nodes
-  };
-}
-
-function satCachedExactExtensionStatus(variableCount, clauses, assignment, cache, maxNodes) {
-  const signature = satAssignmentSignature(assignment, variableCount);
-  if (cache.has(signature)) return cache.get(signature);
-  const result = satExactExtensionStatus(variableCount, clauses, assignment, maxNodes);
-  cache.set(signature, result);
-  return result;
-}
-
-function satDecisionFormulaPrecheck(candidate, assignment, clauses, partialAssignmentValidator, branch, exactExtensionPrecheck = null) {
+function satDecisionFormulaPrecheck(candidate, assignment, clauses, partialAssignmentValidator, branch) {
   const working = assignment.slice();
   if (working[candidate.variable] !== -1 && working[candidate.variable] !== candidate.value) return false;
   working[candidate.variable] = candidate.value;
   const propagated = propagateSatUnitsIntoAssignment(clauses, working);
   if (!propagated.valid) return false;
   if (partialAssignmentValidator && !partialAssignmentValidator(working, branch)) return false;
-  if (exactExtensionPrecheck) {
-    const exact = exactExtensionPrecheck(working);
-    if (exact.known && !exact.canExtend) return false;
-  }
   return true;
 }
 
@@ -3907,11 +3822,6 @@ function runSatWitnessHcDecisionSearch(prepared, formulaVariableCount, formulaCl
   const beta = 1.0 / Math.sqrt(Math.max(Number.MIN_VALUE, baseMoments.tourVariance));
   const requestedBacktracks = Math.max(0, Math.floor(getHcBacktrackTries()));
   const branchLimit = Math.max(1, requestedBacktracks);
-  const exactPrecheckCache = new Map();
-  const exactPrecheckMaxNodes = Math.max(1, Math.floor(Number(options.satExactPrecheckNodeLimit || 60000)));
-  const exactExtensionPrecheck = options.satExactPrecheck === false || variableCount > 24 || formulaClauses.length > 1000
-    ? null
-    : assignment => satCachedExactExtensionStatus(variableCount, formulaClauses, assignment, exactPrecheckCache, exactPrecheckMaxNodes);
   const domainForcedDecisionsAfterChoice = options.forcedDecisionsAfterChoice || null;
   const forcedDecisionsAfterChoice = (candidate, assignment, branch) => {
     const working = assignment.slice();
@@ -4027,7 +3937,7 @@ function runSatWitnessHcDecisionSearch(prepared, formulaVariableCount, formulaCl
       }
       if (remainingDecisions.length > 0) {
         remainingDecisions = remainingDecisions.filter(candidate =>
-          satDecisionFormulaPrecheck(candidate, branch.assignment, formulaClauses, partialAssignmentValidator, branch, exactExtensionPrecheck));
+          satDecisionFormulaPrecheck(candidate, branch.assignment, formulaClauses, partialAssignmentValidator, branch));
         if (remainingDecisions.length === 0) {
           bestFailureReason = "all remaining SAT witness choices are exactly impossible";
           break;
