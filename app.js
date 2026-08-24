@@ -46,6 +46,56 @@ function makeMatrix(n, fill = 0) {
   return Array.from({ length: n + 1 }, () => Array(n + 1).fill(fill));
 }
 
+function makeSparseEdgeMatrix(n) {
+  const storage = Array.from({ length: n + 1 }, () => new Map());
+  const rows = storage.map(values => {
+    return new Proxy(values, {
+      get(target, property) {
+        if (typeof property === "symbol") return target[property];
+        if (property in target) {
+          const value = target[property];
+          return typeof value === "function" ? value.bind(target) : value;
+        }
+        const index = Number(property);
+        if (Number.isInteger(index) && index >= 0 && index <= n) {
+          return target.get(index) || 0;
+        }
+        return undefined;
+      },
+      set(target, property, value) {
+        const index = Number(property);
+        if (Number.isInteger(index) && index >= 0 && index <= n) {
+          if (value === 0 || value === undefined || value === null) target.delete(index);
+          else target.set(index, value);
+          return true;
+        }
+        target[property] = value;
+        return true;
+      }
+    });
+  });
+  Object.defineProperty(rows, "sparseRows", {
+    value: storage,
+    enumerable: false,
+    configurable: true
+  });
+  Object.defineProperty(rows, "sparse", {
+    value: true,
+    enumerable: false,
+    configurable: true
+  });
+  return rows;
+}
+
+function setSparseEdgeWeight(edge, from, to, weight) {
+  if (edge.sparseRows) {
+    if (weight === 0 || weight === undefined || weight === null) edge.sparseRows[from].delete(to);
+    else edge.sparseRows[from].set(to, weight);
+    return;
+  }
+  edge[from][to] = weight;
+}
+
 function buildSquaredEdgeMatrix(edge, n) {
   const edgeSquared = makeMatrix(n);
   for (let i = 0; i <= n; i++) {
@@ -1825,16 +1875,31 @@ function runScoreGuidedBacktracking(edge, n, edgeSquared, rootEndpointLink, root
     : { lines: lines || [], totalTourCost: NaN, partialTourCost: NaN, hamiltonianFound: false, bestFinals: [] };
 }
 
+function graphNeighborsForVertex(edge, n, state, vertex) {
+  const adjacency = state &&
+    state.useAllowedEdgeAdjacency &&
+    state.allowedEdges &&
+    state.allowedEdges.adjacencyByVertex;
+  if (adjacency && adjacency[vertex]) {
+    return adjacency[vertex]
+      .map(item => item.to)
+      .filter(neighbor => vertex !== neighbor && edge[vertex][neighbor] !== 0);
+  }
+
+  const neighbors = [];
+  for (let neighbor = 1; neighbor <= n; neighbor++) {
+    if (vertex !== neighbor && edge[vertex][neighbor] !== 0) neighbors.push(neighbor);
+  }
+  return neighbors;
+}
+
 function applyDegreeTwoForcedEdges(edge, n, endpointLink, state) {
   const tried = new Set();
   let forcedVertexCount = 0;
   let forcedEdgeCount = 0;
 
   for (let vertex = 1; vertex <= n; vertex++) {
-    const neighbors = [];
-    for (let neighbor = 1; neighbor <= n; neighbor++) {
-      if (vertex !== neighbor && edge[vertex][neighbor] !== 0) neighbors.push(neighbor);
-    }
+    const neighbors = graphNeighborsForVertex(edge, n, state, vertex);
     if (neighbors.length !== 2) continue;
 
     let appliedForVertex = false;
@@ -3228,7 +3293,7 @@ function buildYesTriangleGraph() {
   };
 }
 
-function buildDirectVertexCoverHcGraph(vertexCount, coverLimit, edges, padding = 0) {
+function buildDirectVertexCoverHcGraph(vertexCount, coverLimit, edges, padding = 0, options = {}) {
   const normalizedEdges = normalizeUndirectedEdges(vertexCount, edges);
   if (normalizedEdges.length === 0) return buildYesTriangleGraph();
 
@@ -3254,7 +3319,8 @@ function buildDirectVertexCoverHcGraph(vertexCount, coverLimit, edges, padding =
   }
   const paddingNodes = Array.from({ length: Math.max(0, padding) }, () => nextNode++);
   const totalNodes = nextNode - 1;
-  const edge = makeMatrix(totalNodes);
+  const useSparseEdgeMatrix = Boolean(options.sparseEdgeMatrix);
+  const edge = useSparseEdgeMatrix ? makeSparseEdgeMatrix(totalNodes) : makeMatrix(totalNodes);
   const allowedEdgeKeys = new Set();
   const allowedEdges = [];
   const decisionEdgeKeys = new Set();
@@ -3265,8 +3331,13 @@ function buildDirectVertexCoverHcGraph(vertexCount, coverLimit, edges, padding =
 
   const add = (from, to, decision = false) => {
     if (from === to) return "";
-    edge[from][to] = -1;
-    edge[to][from] = -1;
+    if (useSparseEdgeMatrix) {
+      setSparseEdgeWeight(edge, from, to, -1);
+      setSparseEdgeWeight(edge, to, from, -1);
+    } else {
+      edge[from][to] = -1;
+      edge[to][from] = -1;
+    }
     const key = edgeKey(from, to);
     if (!allowedEdgeKeys.has(key)) {
       allowedEdgeKeys.add(key);
@@ -3384,6 +3455,8 @@ function buildDirectVertexCoverHcGraph(vertexCount, coverLimit, edges, padding =
     paddingNodes: paddingNodes.length,
     vertexPaths,
     normalizedEdges,
+    sparseEdgeMatrix: useSparseEdgeMatrix,
+    useAllowedEdgeAdjacency: Boolean(options.useAllowedEdgeAdjacency),
     vertexCoverPropagation: {
       coverLimit,
       connectorEdgesByVertex,
@@ -3883,7 +3956,8 @@ function runSatWitnessHcDecisionSearch(prepared, formulaVariableCount, formulaCl
     satAllDecisionCandidates: allSatDecisionCandidates,
     satDecisionCandidateFilter: options.decisionCandidateFilter || null,
     satForcedDecisionsAfterChoice: forcedDecisionsAfterChoice,
-    satWitnessOnlyPropagation: options.satWitnessOnlyPropagation !== false
+    satWitnessOnlyPropagation: options.satWitnessOnlyPropagation !== false,
+    useAllowedEdgeAdjacency: Boolean(graph.useAllowedEdgeAdjacency)
   };
 
   const rootEndpointLink = Array(graph.n + 1).fill(0);
@@ -3893,7 +3967,8 @@ function runSatWitnessHcDecisionSearch(prepared, formulaVariableCount, formulaCl
     chosenEdgeTotal: 0,
     chosenEdges: [],
     allowedEdgeKeys: graph.allowedEdgeKeys,
-    allowedEdges: graph.allowedEdges
+    allowedEdges: graph.allowedEdges,
+    useAllowedEdgeAdjacency: Boolean(graph.useAllowedEdgeAdjacency)
   };
   const initialForced = propagateConfiguredForcedEdges(graph.edge, graph.n, rootEndpointLink, rootState, searchOptions);
   const baseAssignment = convertSimplifiedAssignment(prepared.simplified.assignment, variableCount);
@@ -5865,7 +5940,7 @@ function buildSatToVertexCoverInstance(variableCount, clauses, padding = 0) {
   };
 }
 
-function prepareSatViaVertexCoverForHc(sat, padding, materializeLimit = getHcSolveNodeLimit()) {
+function prepareSatViaVertexCoverForHc(sat, padding, materializeLimit = getHcSolveNodeLimit(), graphOptions = {}) {
   const simplified = simplify3SatForHc(sat.variableCount, sat.clauses);
   if (simplified.contradiction) {
     return { simplified, vertexCover: null, graph: null, stats: null, skipped: false };
@@ -5884,7 +5959,7 @@ function prepareSatViaVertexCoverForHc(sat, padding, materializeLimit = getHcSol
   }
 
   const vertexCover = buildSatToVertexCoverInstance(simplified.variableCount, simplified.clauses, padding);
-  const graph = buildDirectVertexCoverHcGraph(vertexCover.n, vertexCover.k, vertexCover.edges, padding);
+  const graph = buildDirectVertexCoverHcGraph(vertexCover.n, vertexCover.k, vertexCover.edges, padding, graphOptions);
   if (graph.vertexCoverPropagation) {
     graph.vertexCoverPropagation.satLiteralByVertex = vertexCover.satLiteralByVertex;
     graph.vertexCoverPropagation.satVariableCount = vertexCover.variableCount;
@@ -6149,7 +6224,10 @@ function runSetCover(text) {
   }
 
   const sat = setCoverTo3Sat(reduced.universeSize, reduced.setCount, reduced.k, reduced.sets);
-  const prepared = prepareSatViaVertexCoverForHc(sat, padding);
+  const prepared = prepareSatViaVertexCoverForHc(sat, padding, getHcSolveNodeLimit(), {
+    sparseEdgeMatrix: true,
+    useAllowedEdgeAdjacency: true
+  });
   appendSatViaVertexCoverHcReduction(lines, prepared, "Set Cover via 3-SAT -> Vertex Cover -> direct HC", "Set Cover", "YES", "NO", search => {
     const limit = witnessDisplayLimit();
     const covers = search.satisfyingAssignments
