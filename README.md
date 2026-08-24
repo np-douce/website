@@ -82,6 +82,80 @@ $$\sigma^2 = \langle H^2 \rangle - \mu^2$$
 
 The implementation evaluates the second moment using combinatorial classes of edge pairs instead of summing over every Hamiltonian cycle.
 
+Define three graph-wide sums:
+
+$$S_2 = \sum_{e \in E} w_e^2$$
+
+$$A = \sum_{\substack{e < f \\ e \cap f \neq \varnothing}} w_e w_f$$
+
+$$D = \sum_{\substack{e < f \\ e \cap f = \varnothing}} w_e w_f$$
+
+Here:
+
+- $S_2$ is the sum of squared edge weights.
+- $A$ is the sum of products for edge pairs that share a vertex.
+- $D$ is the sum of products for edge pairs that are vertex-disjoint.
+
+The probabilities come from Hamiltonian-cycle counting in $K_n$:
+
+$$P(e \in \tau) = \frac{2}{n - 1}$$
+
+$$P(e,f \in \tau \mid e \cap f \neq \varnothing) = \frac{2}{(n - 1)(n - 2)}$$
+
+$$P(e,f \in \tau \mid e \cap f = \varnothing) = \frac{4}{(n - 1)(n - 2)}$$
+
+Since
+
+$$H(\tau)^2 = \sum_e w_e^2 X_e + 2\sum_{e<f} w_e w_f X_eX_f,$$
+
+the exact second moment is:
+
+$$\langle H^2 \rangle =
+\frac{2}{n - 1}S_2
++ \frac{4}{(n - 1)(n - 2)}A
++ \frac{8}{(n - 1)(n - 2)}D$$
+
+Equivalently, the code writes the pair part as:
+
+$$\langle H^2 \rangle =
+\frac{2}{n - 1}S_2
++ \frac{4}{(n - 1)(n - 2)}(A + 2D)$$
+
+Finally:
+
+$$\sigma^2 =
+\frac{2}{n - 1}S_2
++ \frac{4}{(n - 1)(n - 2)}(A + 2D)
+- \mu^2$$
+
+This is why the app can calculate the variance without enumerating the $(n-1)!/2$ Hamiltonian cycles. It only needs to scan edges and classify edge pairs by whether they touch or are disjoint.
+
+During tour construction the variance is recalculated after some edges have already been committed. The same principle is used, but the remaining graph is no longer a clean unconstrained $K_n$ ensemble. The chosen edges form open path chains, so each remaining candidate edge falls into one of three endpoint classes:
+
+- **free-free**: both endpoints are unused.
+- **active-free**: one endpoint is an open chain endpoint and the other is unused.
+- **active-active**: both endpoints are open chain endpoints from different chains.
+
+Let $F_C$ be the fixed weight of the committed edges, $u$ be the number of vertices already used by committed edges, and $c$ be the current number of open chains. The remaining factorial term is:
+
+$$r = n - 1 + c - u$$
+
+The conditioned mean has the form:
+
+$$\mu_C =
+F_C
++ \frac{1}{2r}S_{\mathrm{AA}}
++ \frac{1}{r}S_{\mathrm{AF}}
++ \frac{2}{r}S_{\mathrm{FF}}$$
+
+where $S_{\mathrm{AA}}$, $S_{\mathrm{AF}}$, and $S_{\mathrm{FF}}$ are the sums of remaining edge weights in the active-active, active-free, and free-free classes.
+
+The conditioned variance uses the same idea as the unconstrained formula:
+
+$$\sigma_C^2 = \langle (H - F_C)^2 \rangle_C - (\mu_C - F_C)^2$$
+
+The app computes $\langle (H - F_C)^2 \rangle_C$ by bucketed edge-pair products: active-active pairs, active-free touching pairs, active-free disjoint pairs, free-free touching pairs, free-free disjoint pairs, and mixed active/free pair classes. This is the harder-looking part of the code, but conceptually it is still the same variance formula: square terms plus edge-pair interaction terms, weighted by how often each class can appear in the remaining Hamiltonian completions.
+
 ## Partition-function approximation
 
 Expanding the logarithm of the partition function around $\beta = 0$ gives the cumulant expansion:
