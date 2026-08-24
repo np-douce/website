@@ -141,11 +141,17 @@ P(e,f \in \tau \mid e \cap f = \varnothing) = \frac{4}{(n - 1)(n - 2)}
 Since
 
 ```math
-H(\tau)^2 =
-(\sum_{e \in E} w_e X_e(\tau))^2
+H(\tau)^2
+=
+\left(\sum_{e \in E} w_e X_e(\tau)\right)^2
+```
+
+```math
+H(\tau)^2
 =
 \sum_{e \in E} w_e^2 X_e(\tau)
-+ 2\sum_{e<f} w_e w_f X_e(\tau)X_f(\tau)
++
+2\sum_{e<f} w_e w_f X_e(\tau)X_f(\tau)
 ```
 
 the exact second moment is:
