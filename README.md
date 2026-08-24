@@ -1,5 +1,7 @@
 # NP-douce 1.2
 
+**NP-douce** is an experimental research application for exploring combinatorial optimization problems using ideas from statistical mechanics, exact combinatorial counting, and constrained solution-space analysis.
+
 Open `index.html` in a browser to run the app.
 
 The app is static: it uses only local HTML, CSS, and JavaScript. No server is required for desktop use.
@@ -17,6 +19,187 @@ The app is static: it uses only local HTML, CSS, and JavaScript. No server is re
 - TSP matrix input
 - TSP Euclidean points input
 - TSP manual upper-triangle edge input
+
+## Theory overview
+
+For a complete weighted graph
+
+```text
+G = (V, E)
+```
+
+with `n = |V|` vertices, NP-douce studies the ensemble of Hamiltonian cycles. The number of distinct undirected Hamiltonian cycles is:
+
+```text
+Omega_0 = (n - 1)! / 2
+```
+
+Rather than enumerating every tour, the app computes aggregate properties of the Hamiltonian solution space:
+
+- number of Hamiltonian states
+- exact average tour weight
+- variance and standard deviation of tour weights
+- statistics conditioned on selected edges
+- approximate partition functions
+- candidate-edge importance scores
+- iterative construction of a Hamiltonian tour or reduced-problem witness
+
+Through polynomial-time reductions, the same Hamiltonian-cycle framework is used for 3-SAT, Vertex Cover, Clique, Independent Set, Set Cover, X3C, and Graph Coloring. The app should still be treated as an experimental implementation: computational demonstrations are useful for exploration, but formal complexity claims need independent proof.
+
+## Statistical-mechanical model
+
+Each Hamiltonian cycle `tau` is treated as a microstate with energy equal to its tour weight:
+
+```text
+H(tau) = sum over e in tau of w_e
+```
+
+The partition function is:
+
+```text
+Z(beta) = sum over tau in H of exp(-beta * H(tau))
+```
+
+Here `beta` is the inverse-temperature parameter and `H` is the set of Hamiltonian cycles. At `beta = 0`, all Hamiltonian cycles have equal statistical weight:
+
+```text
+Z(0) = Omega_0 = (n - 1)! / 2
+```
+
+## Exact mean tour weight
+
+Every edge in the complete graph `K_n` occurs in exactly `(n - 2)!` Hamiltonian cycles. If
+
+```text
+W = sum over e in E of w_e
+```
+
+then the exact mean weight of all Hamiltonian cycles is:
+
+```text
+mu = (2 / (n - 1)) * W
+```
+
+This can be computed directly from the graph without enumerating Hamiltonian tours.
+
+## Tour-weight variance
+
+The tour energy can be written using edge-indicator variables:
+
+```text
+H(tau) = sum over e in E of w_e * X_e(tau)
+```
+
+where `X_e(tau) = 1` when edge `e` is in the tour and `0` otherwise.
+
+The tour-weight variance is:
+
+```text
+sigma^2 = <H^2> - mu^2
+```
+
+The implementation evaluates the second moment using combinatorial classes of edge pairs instead of summing over every Hamiltonian cycle.
+
+## Partition-function approximation
+
+Expanding the logarithm of the partition function around `beta = 0` gives the cumulant expansion:
+
+```text
+ln Z(beta) = ln Omega - beta*kappa_1 + (beta^2 / 2)*kappa_2 - ...
+```
+
+Using `kappa_1 = mu` and `kappa_2 = sigma^2`, NP-douce uses the second-order approximation:
+
+```text
+ln Z(beta) ~= ln Omega - beta*mu + 0.5*beta^2*sigma^2
+```
+
+This gives a compact statistical description of a very large Hamiltonian solution space.
+
+## Constrained Hamiltonian ensembles
+
+NP-douce also calculates statistics after some edges have already been chosen. Let `C` be the set of edges forced into the tour. The constrained ensemble is:
+
+```text
+H_C = { tau in H : C is a subset of tau }
+```
+
+For compatible configurations, the constrained state count is:
+
+```text
+Omega_C = 2^(|C| - 1) * (n - 1 + |C| - |V_C|)!
+```
+
+where `|C|` is the number of selected edges and `|V_C|` is the number of vertices touched by those edges.
+
+The constrained statistical model is:
+
+```text
+ln Z_C(beta) ~= ln Omega_C - beta*mu_C + 0.5*beta^2*sigma_C^2
+```
+
+## Edge importance
+
+For a candidate edge `e`, NP-douce compares the future solution space where the edge is selected with the current conditioned solution space. In the app this is reported as an importance score:
+
+```text
+I(e) = ln Z(C + e) - ln Z(C without e)
+```
+
+With the second-order approximation, the score measures how the candidate changes the remaining state count, mean, and variance:
+
+```text
+I(e) ~= ln(Omega(C + e) / Omega(C without e))
+       - beta * Delta mu_e
+       + 0.5 * beta^2 * Delta sigma_e^2
+```
+
+The point is not just to prefer a small edge weight. The score asks how choosing that edge changes the statistical structure of the remaining Hamiltonian solution space.
+
+## Tour and witness construction
+
+Starting from no committed edges, the app evaluates admissible candidate edges and selects:
+
+```text
+e*_t = arg max over e in A_t of I_t(e)
+```
+
+Then it updates the committed-edge set:
+
+```text
+C_(t+1) = C_t union {e*_t}
+```
+
+The admissible set is restricted so Hamiltonian feasibility is preserved, including degree constraints and prevention of premature subtours.
+
+For reduction tabs, the displayed answer is inferred back into the original problem. For example, a Hamiltonian witness produced by a Clique reduction is translated back into a clique such as `{1, 2, 3}`.
+
+## Conceptual flow
+
+```text
+NP-complete problem
+      |
+      v
+Polynomial-time reduction to Hamiltonian Cycle
+      |
+      v
+Exact combinatorial counting
+      |
+      v
+State count, mean, variance
+      |
+      v
+Approximate ln Z
+      |
+      v
+Candidate-edge importance
+      |
+      v
+Iterative edge or witness selection
+      |
+      v
+Hamiltonian tour or inferred original-problem answer
+```
 
 ## Math note
 
@@ -304,3 +487,88 @@ Example 4-colorable instance:
 ```
 
 That second graph is `K4`: it is not 3-colorable, but it is 4-colorable. The 3-SAT encoding uses `colors * vertices` base variables, one at-least-one-color clause per vertex, pairwise not-both color clauses per vertex, and one conflict clause per edge per color before 3-literal normalization.
+
+## Repository structure
+
+The browser app is intentionally simple:
+
+```text
+index.html
+app.js
+styles.css
+manifest.webmanifest
+sw.js
+np-douce-logo.png
+*_input.txt
+README.md
+```
+
+The `*_input.txt` files are example inputs for the problem tabs. The app is static and can run from the local folder or from GitHub Pages.
+
+## Running the browser version
+
+For local use, open `index.html` in a browser. For hosted use, serve the folder with GitHub Pages or any static-file server.
+
+Because the app uses browser JavaScript, caching, and a service worker, GitHub Pages can sometimes keep older files briefly. The service worker cache name is updated when the app version changes.
+
+## Offline support
+
+The browser version uses a service worker to cache common app resources:
+
+```text
+manifest.webmanifest
+sw.js
+index.html
+app.js
+styles.css
+np-douce-logo.png
+```
+
+Once cached, supported browsers may allow the app to keep working offline, subject to browser cache rules.
+
+## Research status
+
+NP-douce is an experimental research prototype and reference implementation.
+
+The project is intended to support experimentation, verification, benchmarking, and visualization of the mathematical framework. Results from the software should be independently verified when used for formal mathematical or complexity-theoretic claims.
+
+## Goals
+
+The project explores whether useful global information about difficult combinatorial solution spaces can be obtained from exact combinatorial statistics.
+
+In particular, NP-douce investigates the relationship:
+
+```text
+Combinatorics <-> Statistical Mechanics <-> Optimization
+```
+
+The central quantities are:
+
+```text
+Omega, mu, sigma^2, ln Z, I(e)
+```
+
+Together they provide a statistical representation of the Hamiltonian solution space and a mechanism for comparing candidate optimization decisions across NP-complete problem classes.
+
+## Citation
+
+If you use this project in academic work, cite the associated paper or repository. A formal citation can be updated when final publication information is available.
+
+```bibtex
+@software{npdouce,
+  author = {Michel Seraphin},
+  title  = {NP-Douce},
+  year   = {2026},
+  note   = {Experimental research software for combinatorial optimization}
+}
+```
+
+## Author
+
+**Michel Seraphin**
+
+Independent research in combinatorial optimization, Hamiltonian problems, and statistical-mechanical methods for discrete systems.
+
+## Disclaimer
+
+This repository contains experimental research software. The implementation and numerical experiments are intended for research and educational purposes. Computational demonstrations should not be construed as formal proofs of computational complexity results or polynomial-time solvability of NP-complete problems.
