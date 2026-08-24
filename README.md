@@ -24,15 +24,11 @@ The app is static: it uses only local HTML, CSS, and JavaScript. No server is re
 
 For a complete weighted graph
 
-```text
-G = (V, E)
-```
+$$G = (V, E)$$
 
-with `n = |V|` vertices, NP-douce studies the ensemble of Hamiltonian cycles. The number of distinct undirected Hamiltonian cycles is:
+with $n = |V|$ vertices, NP-douce studies the ensemble of Hamiltonian cycles. The number of distinct undirected Hamiltonian cycles is:
 
-```text
-Omega_0 = (n - 1)! / 2
-```
+$$\Omega_0 = \frac{(n - 1)!}{2}$$
 
 Rather than enumerating every tour, the app computes aggregate properties of the Hamiltonian solution space:
 
@@ -48,37 +44,27 @@ Through polynomial-time reductions, the same Hamiltonian-cycle framework is used
 
 ## Statistical-mechanical model
 
-Each Hamiltonian cycle `tau` is treated as a microstate with energy equal to its tour weight:
+Each Hamiltonian cycle $\tau$ is treated as a microstate with energy equal to its tour weight:
 
-```text
-H(tau) = sum over e in tau of w_e
-```
+$$H(\tau) = \sum_{e \in \tau} w_e$$
 
 The partition function is:
 
-```text
-Z(beta) = sum over tau in H of exp(-beta * H(tau))
-```
+$$Z(\beta) = \sum_{\tau \in \mathcal{H}} e^{-\beta H(\tau)}$$
 
-Here `beta` is the inverse-temperature parameter and `H` is the set of Hamiltonian cycles. At `beta = 0`, all Hamiltonian cycles have equal statistical weight:
+Here $\beta$ is the inverse-temperature parameter and $\mathcal{H}$ is the set of Hamiltonian cycles. At $\beta = 0$, all Hamiltonian cycles have equal statistical weight:
 
-```text
-Z(0) = Omega_0 = (n - 1)! / 2
-```
+$$Z(0) = \Omega_0 = \frac{(n - 1)!}{2}$$
 
 ## Exact mean tour weight
 
-Every edge in the complete graph `K_n` occurs in exactly `(n - 2)!` Hamiltonian cycles. If
+Every edge in the complete graph $K_n$ occurs in exactly $(n - 2)!$ Hamiltonian cycles. If
 
-```text
-W = sum over e in E of w_e
-```
+$$W = \sum_{e \in E} w_e$$
 
 then the exact mean weight of all Hamiltonian cycles is:
 
-```text
-mu = (2 / (n - 1)) * W
-```
+$$\mu = \frac{2W}{n - 1}$$
 
 This can be computed directly from the graph without enumerating Hamiltonian tours.
 
@@ -86,73 +72,53 @@ This can be computed directly from the graph without enumerating Hamiltonian tou
 
 The tour energy can be written using edge-indicator variables:
 
-```text
-H(tau) = sum over e in E of w_e * X_e(tau)
-```
+$$H(\tau) = \sum_{e \in E} w_e X_e(\tau)$$
 
-where `X_e(tau) = 1` when edge `e` is in the tour and `0` otherwise.
+where $X_e(\tau)=1$ when edge $e$ is in the tour and $0$ otherwise.
 
 The tour-weight variance is:
 
-```text
-sigma^2 = <H^2> - mu^2
-```
+$$\sigma^2 = \langle H^2 \rangle - \mu^2$$
 
 The implementation evaluates the second moment using combinatorial classes of edge pairs instead of summing over every Hamiltonian cycle.
 
 ## Partition-function approximation
 
-Expanding the logarithm of the partition function around `beta = 0` gives the cumulant expansion:
+Expanding the logarithm of the partition function around $\beta = 0$ gives the cumulant expansion:
 
-```text
-ln Z(beta) = ln Omega - beta*kappa_1 + (beta^2 / 2)*kappa_2 - ...
-```
+$$\ln Z(\beta) = \ln \Omega - \beta\kappa_1 + \frac{\beta^2}{2}\kappa_2 - \cdots$$
 
-Using `kappa_1 = mu` and `kappa_2 = sigma^2`, NP-douce uses the second-order approximation:
+Using $\kappa_1 = \mu$ and $\kappa_2 = \sigma^2$, NP-douce uses the second-order approximation:
 
-```text
-ln Z(beta) ~= ln Omega - beta*mu + 0.5*beta^2*sigma^2
-```
+$$\ln Z(\beta) \approx \ln \Omega - \beta\mu + \frac{\beta^2\sigma^2}{2}$$
 
 This gives a compact statistical description of a very large Hamiltonian solution space.
 
 ## Constrained Hamiltonian ensembles
 
-NP-douce also calculates statistics after some edges have already been chosen. Let `C` be the set of edges forced into the tour. The constrained ensemble is:
+NP-douce also calculates statistics after some edges have already been chosen. Let $C$ be the set of edges forced into the tour. The constrained ensemble is:
 
-```text
-H_C = { tau in H : C is a subset of tau }
-```
+$$\mathcal{H}_C = \{\tau \in \mathcal{H} : C \subseteq \tau\}$$
 
 For compatible configurations, the constrained state count is:
 
-```text
-Omega_C = 2^(|C| - 1) * (n - 1 + |C| - |V_C|)!
-```
+$$\Omega_C = 2^{|C| - 1}\left(n - 1 + |C| - |V_C|\right)!$$
 
-where `|C|` is the number of selected edges and `|V_C|` is the number of vertices touched by those edges.
+where $|C|$ is the number of selected edges and $|V_C|$ is the number of vertices touched by those edges.
 
 The constrained statistical model is:
 
-```text
-ln Z_C(beta) ~= ln Omega_C - beta*mu_C + 0.5*beta^2*sigma_C^2
-```
+$$\ln Z_C(\beta) \approx \ln \Omega_C - \beta\mu_C + \frac{\beta^2\sigma_C^2}{2}$$
 
 ## Edge importance
 
-For a candidate edge `e`, NP-douce compares the future solution space where the edge is selected with the current conditioned solution space. In the app this is reported as an importance score:
+For a candidate edge $e$, NP-douce compares the future solution space where the edge is selected with the current conditioned solution space. In the app this is reported as an importance score:
 
-```text
-I(e) = ln Z(C + e) - ln Z(C without e)
-```
+$$I(e) = \ln Z(C + e) - \ln Z(C \setminus e)$$
 
 With the second-order approximation, the score measures how the candidate changes the remaining state count, mean, and variance:
 
-```text
-I(e) ~= ln(Omega(C + e) / Omega(C without e))
-       - beta * Delta mu_e
-       + 0.5 * beta^2 * Delta sigma_e^2
-```
+$$I(e) \approx \ln\left(\frac{\Omega(C + e)}{\Omega(C \setminus e)}\right) - \beta\Delta\mu_e + \frac{\beta^2}{2}\Delta\sigma_e^2$$
 
 The point is not just to prefer a small edge weight. The score asks how choosing that edge changes the statistical structure of the remaining Hamiltonian solution space.
 
@@ -160,15 +126,11 @@ The point is not just to prefer a small edge weight. The score asks how choosing
 
 Starting from no committed edges, the app evaluates admissible candidate edges and selects:
 
-```text
-e*_t = arg max over e in A_t of I_t(e)
-```
+$$e_t^* = \arg\max_{e \in A_t} I_t(e)$$
 
 Then it updates the committed-edge set:
 
-```text
-C_(t+1) = C_t union {e*_t}
-```
+$$C_{t+1} = C_t \cup \{e_t^*\}$$
 
 The admissible set is restricted so Hamiltonian feasibility is preserved, including degree constraints and prevention of premature subtours.
 
@@ -225,13 +187,29 @@ Reduction tabs run the HC solver over the full set of real allowed HC edges from
 
 Before a generated 3-SAT formula is sent to Vertex Cover, reduction tabs run exact unit-clause simplification. A clause like `[-3, -3, -3]` is treated as the unit clause `~x3`, so `x3=false` is forced and satisfied clauses are removed. Binary clauses are kept during simplification, then the classic Vertex Cover clause triangle duplicates one literal when a two-literal clause must become a 3-literal triangle.
 
-The HC solver now uses the importance score automatically: `lnZ(CE + e) - lnZ(CE without e)`. The older omega-only score is no longer exposed as a setting.
+The HC solver now uses the importance score automatically:
 
-Adaptive beta is automatic. Each choice step recomputes the current conditioned standard deviation and uses `1 / current standard deviation`.
+$$I(e) = \ln Z(CE + e) - \ln Z(CE \setminus e)$$
+
+The older omega-only score is no longer exposed as a setting.
+
+Adaptive beta is automatic. Each choice step recomputes the current conditioned standard deviation and uses:
+
+$$\beta = \frac{1}{\sigma_C}$$
 
 Score-guided backtracking is controlled by `HC backtrack tries`, which defaults to `0`. On SAT-based reduction tabs, `0` means one greedy SAT witness branch with no saved alternatives; raising the value queues next-best witness branches. The `Search all answers` switch can either stop when the first Hamiltonian witness is accepted or keep searching all allowed tries and list distinct witnesses it finds. Matrix, points, and manual weighted tabs keep using the all-tries best-tour behavior. The global solver tuning is the HC solve node limit, `HC backtrack tries`, and the `Search all answers` switch.
 
-Candidate edges are normalized with the state function omega. For each valid edge, the app uses the count term `N(e) = 2^(CE - 1) * (n - 1 - VCE + CE)!`, computes `L(e) = ln(N(e)) - beta * mean + 0.5 * beta^2 * variance`, shifts by `M = max L`, then uses `P(e) = exp(L(e) - M) / omega` with `omega = sum exp(L(f) - M)`.
+Candidate edges are normalized with the state function $\omega$. For each valid edge, the app uses the count term:
+
+$$N(e) = 2^{CE - 1}\left(n - 1 - VCE + CE\right)!$$
+
+Then it computes:
+
+$$L(e) = \ln N(e) - \beta\mu_e + \frac{1}{2}\beta^2\sigma_e^2$$
+
+After shifting by $M = \max_f L(f)$, the probability-style normalization is:
+
+$$P(e) = \frac{e^{L(e)-M}}{\omega}, \qquad \omega = \sum_f e^{L(f)-M}$$
 
 Before scoring, the raw HC solver runs necessary graph checks and the original degree-2 forced-edge precheck: if a vertex has exactly two listed HC edges, both are forced into the tour before the scoring loop continues.
 
@@ -538,15 +516,11 @@ The project explores whether useful global information about difficult combinato
 
 In particular, NP-douce investigates the relationship:
 
-```text
-Combinatorics <-> Statistical Mechanics <-> Optimization
-```
+$$\text{Combinatorics} \longleftrightarrow \text{Statistical Mechanics} \longleftrightarrow \text{Optimization}$$
 
 The central quantities are:
 
-```text
-Omega, mu, sigma^2, ln Z, I(e)
-```
+$$\boxed{\Omega,\quad \mu,\quad \sigma^2,\quad \ln Z,\quad I(e)}$$
 
 Together they provide a statistical representation of the Hamiltonian solution space and a mechanism for comparing candidate optimization decisions across NP-complete problem classes.
 
