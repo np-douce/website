@@ -106,7 +106,13 @@ $$P(e,f \in \tau \mid e \cap f = \varnothing) = \frac{4}{(n - 1)(n - 2)}$$
 
 Since
 
-$$H(\tau)^2 = \sum_e w_e^2 X_e + 2\sum_{e<f} w_e w_f X_eX_f,$$
+$$
+H(\tau)^2 =
+\left(\sum_{e \in E} w_e X_e(\tau)\right)^2
+=
+\sum_{e \in E} w_e^2 X_e(\tau)
++ 2\sum_{\{e,f\}\subseteq E} w_e w_f X_e(\tau)X_f(\tau)
+$$
 
 the exact second moment is:
 
