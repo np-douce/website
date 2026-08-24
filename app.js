@@ -2432,6 +2432,169 @@ function partialFormulaCanStillBeSatisfied(clauses, assignment) {
   return true;
 }
 
+function propagateSatUnitsIntoAssignment(clauses, assignment) {
+  const forcedDecisions = [];
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+    for (const clause of clauses) {
+      let satisfied = false;
+      let openLiteral = 0;
+      let openCount = 0;
+
+      for (const literal of clause) {
+        const variable = Math.abs(literal);
+        if (assignment[variable] === -1 || assignment[variable] === undefined) {
+          openLiteral = literal;
+          openCount += 1;
+        } else if (literalIsTrue(literal, assignment)) {
+          satisfied = true;
+          break;
+        }
+      }
+
+      if (satisfied) continue;
+      if (openCount === 0) {
+        return {
+          valid: false,
+          forcedDecisions,
+          reason: "partial assignment already falsifies a clause"
+        };
+      }
+
+      if (openCount === 1) {
+        const variable = Math.abs(openLiteral);
+        const value = openLiteral > 0 ? 1 : 0;
+        if (assignment[variable] !== -1 && assignment[variable] !== undefined && assignment[variable] !== value) {
+          return {
+            valid: false,
+            forcedDecisions,
+            reason: `unit clauses force both values for x${variable}`
+          };
+        }
+        if (assignment[variable] === -1 || assignment[variable] === undefined) {
+          assignment[variable] = value;
+          forcedDecisions.push({ variable, value });
+          changed = true;
+        }
+      }
+    }
+  }
+
+  return { valid: true, forcedDecisions, reason: "" };
+}
+
+function satUnitForcedDecisionsFromAssignment(clauses, assignment) {
+  const working = assignment.slice();
+  const propagated = propagateSatUnitsIntoAssignment(clauses, working);
+  if (!propagated.valid) return propagated;
+
+  const forcedDecisions = [];
+  for (let variable = 1; variable < working.length; variable++) {
+    if (assignment[variable] === -1 && working[variable] !== -1 && working[variable] !== undefined) {
+      forcedDecisions.push({ variable, value: working[variable] });
+    }
+  }
+
+  return { valid: true, forcedDecisions, reason: "" };
+}
+
+function chooseUnassignedSatVariableForSearch(clauses, assignment, variableCount) {
+  let bestClause = null;
+  let bestOpenCount = Infinity;
+
+  for (const clause of clauses) {
+    let satisfied = false;
+    let openCount = 0;
+    for (const literal of clause) {
+      const variable = Math.abs(literal);
+      if (assignment[variable] === -1 || assignment[variable] === undefined) {
+        openCount += 1;
+      } else if (literalIsTrue(literal, assignment)) {
+        satisfied = true;
+        break;
+      }
+    }
+    if (satisfied) continue;
+    if (openCount === 0) return { contradiction: true, variable: 0, preferredValue: 1 };
+    if (openCount < bestOpenCount) {
+      bestOpenCount = openCount;
+      bestClause = clause;
+      if (openCount === 1) break;
+    }
+  }
+
+  if (!bestClause) return { contradiction: false, variable: 0, preferredValue: 1 };
+  for (const literal of bestClause) {
+    const variable = Math.abs(literal);
+    if (variable < 1 || variable > variableCount) continue;
+    if (assignment[variable] === -1 || assignment[variable] === undefined) {
+      return { contradiction: false, variable, preferredValue: literal > 0 ? 1 : 0 };
+    }
+  }
+  return { contradiction: true, variable: 0, preferredValue: 1 };
+}
+
+function satExactExtensionStatus(variableCount, clauses, assignment, maxNodes) {
+  let nodes = 0;
+  let exceeded = false;
+
+  const search = current => {
+    nodes += 1;
+    if (nodes > maxNodes) {
+      exceeded = true;
+      return false;
+    }
+
+    const propagated = propagateSatUnitsIntoAssignment(clauses, current);
+    if (!propagated.valid) return false;
+
+    const choice = chooseUnassignedSatVariableForSearch(clauses, current, variableCount);
+    if (choice.contradiction) return false;
+    if (choice.variable === 0) return true;
+
+    const first = choice.preferredValue;
+    const second = first === 1 ? 0 : 1;
+    for (const value of [first, second]) {
+      const next = current.slice();
+      next[choice.variable] = value;
+      if (search(next)) return true;
+      if (exceeded) return false;
+    }
+    return false;
+  };
+
+  const canExtend = search(assignment.slice());
+  return {
+    known: !exceeded,
+    canExtend: canExtend && !exceeded,
+    nodes
+  };
+}
+
+function satCachedExactExtensionStatus(variableCount, clauses, assignment, cache, maxNodes) {
+  const signature = satAssignmentSignature(assignment, variableCount);
+  if (cache.has(signature)) return cache.get(signature);
+  const result = satExactExtensionStatus(variableCount, clauses, assignment, maxNodes);
+  cache.set(signature, result);
+  return result;
+}
+
+function satDecisionFormulaPrecheck(candidate, assignment, clauses, partialAssignmentValidator, branch, exactExtensionPrecheck = null) {
+  const working = assignment.slice();
+  if (working[candidate.variable] !== -1 && working[candidate.variable] !== candidate.value) return false;
+  working[candidate.variable] = candidate.value;
+  const propagated = propagateSatUnitsIntoAssignment(clauses, working);
+  if (!propagated.valid) return false;
+  if (partialAssignmentValidator && !partialAssignmentValidator(working, branch)) return false;
+  if (exactExtensionPrecheck) {
+    const exact = exactExtensionPrecheck(working);
+    if (exact.known && !exact.canExtend) return false;
+  }
+  return true;
+}
+
 function findSatisfyingAssignment(variableCount, clauses, assignment) {
   if (!partialFormulaCanStillBeSatisfied(clauses, assignment)) return false;
   let variable = 0;
@@ -3622,29 +3785,48 @@ function satDecisionLabel(candidate) {
   return `x${candidate.variable}=${candidate.value === 1 ? "true" : "false"}`;
 }
 
-function applySatDecisionCandidate(branch, candidate, graph, searchOptions, applyFollowUps = true) {
+function setSatBranchAssignment(branch, variable, value, reason) {
+  if (branch.assignment[variable] !== -1 && branch.assignment[variable] !== value) {
+    branch.state.invalid = true;
+    branch.state.invalidReason = reason || `SAT witness assignment conflicts at x${variable}.`;
+    return false;
+  }
+  branch.assignment[variable] = value;
+  return true;
+}
+
+function applySatDecisionEdgeChoice(branch, candidate, graph, forcedBy = "") {
   if (!applyChosenEdge(candidate.from, candidate.to, graph.edge, branch.endpointLink, branch.state)) {
     branch.state.invalid = true;
     branch.state.invalidReason = `SAT witness choice ${satDecisionLabel(candidate)} could not be applied.`;
     return false;
   }
-  const forced = propagateConfiguredForcedEdges(graph.edge, graph.n, branch.endpointLink, branch.state, searchOptions);
-  if (branch.state.invalid) return false;
-
-  const inferred = satAssignmentFromVcState(branch.state, searchOptions.vertexCoverPropagation);
-  if (inferred.conflict || !mergeSatAssignment(branch.assignment, inferred.assignment, searchOptions.satVariableCount)) {
-    branch.state.invalid = true;
-    branch.state.invalidReason = `SAT witness choice ${satDecisionLabel(candidate)} conflicts with an earlier witness choice.`;
-    return false;
-  }
+  if (!setSatBranchAssignment(branch, candidate.variable, candidate.value,
+      `SAT witness choice ${satDecisionLabel(candidate)} conflicts with an earlier witness choice.`)) return false;
   branch.decisions.push({
     variable: candidate.variable,
     value: candidate.value,
     edge: { from: candidate.from, to: candidate.to },
-    forcedEdges: forced.forcedEdgeCount
+    forcedEdges: 0,
+    forcedBy
   });
+  return true;
+}
+
+function applySatDecisionCandidate(branch, candidate, graph, searchOptions, applyFollowUps = true) {
+  const firstDecisionIndex = branch.decisions.length;
+  if (!applySatDecisionEdgeChoice(branch, candidate, graph)) return false;
+
   if (applyFollowUps && searchOptions.satForcedDecisionsAfterChoice) {
-    const forcedDecisions = searchOptions.satForcedDecisionsAfterChoice(candidate, branch.assignment, branch) || [];
+    const consequence = searchOptions.satForcedDecisionsAfterChoice(candidate, branch.assignment, branch) || [];
+    if (!Array.isArray(consequence) && consequence.valid === false) {
+      branch.state.invalid = true;
+      branch.state.invalidReason = consequence.reason || `SAT witness consequence proves ${satDecisionLabel(candidate)} impossible.`;
+      return false;
+    }
+    const forcedDecisions = Array.isArray(consequence)
+      ? consequence
+      : (consequence.forcedDecisions || consequence.forced || []);
     for (const forcedDecision of forcedDecisions) {
       const variable = forcedDecision.variable;
       const value = forcedDecision.value;
@@ -3661,8 +3843,22 @@ function applySatDecisionCandidate(branch, candidate, graph, searchOptions, appl
         branch.state.invalidReason = `SAT witness consequence could not force x${variable}=${value === 1 ? "true" : "false"}.`;
         return false;
       }
-      if (!applySatDecisionCandidate(branch, forcedCandidate, graph, searchOptions, false)) return false;
+      if (!applySatDecisionEdgeChoice(branch, forcedCandidate, graph, satDecisionLabel(candidate))) return false;
     }
+  }
+
+  if (searchOptions.satWitnessOnlyPropagation) return true;
+
+  const forced = propagateConfiguredForcedEdges(graph.edge, graph.n, branch.endpointLink, branch.state, searchOptions);
+  if (branch.state.invalid) return false;
+  const inferred = satAssignmentFromVcState(branch.state, searchOptions.vertexCoverPropagation);
+  if (inferred.conflict || !mergeSatAssignment(branch.assignment, inferred.assignment, searchOptions.satVariableCount)) {
+    branch.state.invalid = true;
+    branch.state.invalidReason = `SAT witness choice ${satDecisionLabel(candidate)} conflicts with an earlier witness choice.`;
+    return false;
+  }
+  if (branch.decisions[firstDecisionIndex]) {
+    branch.decisions[firstDecisionIndex].forcedEdges += forced.forcedEdgeCount;
   }
   return true;
 }
@@ -3704,12 +3900,64 @@ function runSatWitnessHcDecisionSearch(prepared, formulaVariableCount, formulaCl
 
   const graphEdgeList = graph.allowedEdges || buildNonzeroEdgeList(graph.edge, graph.n);
   attachEdgeListAdjacency(graphEdgeList, graph.n);
-  const satDecisionCandidates = buildSatDecisionCandidates(graph)
+  const allSatDecisionCandidates = buildSatDecisionCandidates(graph);
+  const satDecisionCandidates = allSatDecisionCandidates
     .filter(candidate => candidate.variable <= decisionVariableCount);
   const baseMoments = computeTheoryMomentsFromEdgeList(graphEdgeList, graph.n);
   const beta = 1.0 / Math.sqrt(Math.max(Number.MIN_VALUE, baseMoments.tourVariance));
   const requestedBacktracks = Math.max(0, Math.floor(getHcBacktrackTries()));
   const branchLimit = Math.max(1, requestedBacktracks);
+  const exactPrecheckCache = new Map();
+  const exactPrecheckMaxNodes = Math.max(1, Math.floor(Number(options.satExactPrecheckNodeLimit || 60000)));
+  const exactExtensionPrecheck = options.satExactPrecheck === false || variableCount > 24 || formulaClauses.length > 1000
+    ? null
+    : assignment => satCachedExactExtensionStatus(variableCount, formulaClauses, assignment, exactPrecheckCache, exactPrecheckMaxNodes);
+  const domainForcedDecisionsAfterChoice = options.forcedDecisionsAfterChoice || null;
+  const forcedDecisionsAfterChoice = (candidate, assignment, branch) => {
+    const working = assignment.slice();
+    const forcedDecisions = [];
+    const addForcedDecision = decision => {
+      if (!decision) return { valid: true };
+      const variable = decision.variable;
+      const value = decision.value;
+      if (!Number.isInteger(variable) || variable < 1 || variable > variableCount) return { valid: true };
+      if (value !== 0 && value !== 1) return { valid: true };
+      if (working[variable] !== -1 && working[variable] !== value) {
+        return {
+          valid: false,
+          reason: `SAT witness consequence conflicts at x${variable}.`
+        };
+      }
+      if (working[variable] === -1) {
+        working[variable] = value;
+        forcedDecisions.push({ variable, value });
+      }
+      return { valid: true };
+    };
+
+    if (domainForcedDecisionsAfterChoice) {
+      const domainResult = domainForcedDecisionsAfterChoice(candidate, assignment, branch) || [];
+      if (!Array.isArray(domainResult) && domainResult.valid === false) {
+        return domainResult;
+      }
+      const domainForced = Array.isArray(domainResult)
+        ? domainResult
+        : (domainResult.forcedDecisions || domainResult.forced || []);
+      for (const decision of domainForced) {
+        const added = addForcedDecision(decision);
+        if (!added.valid) return added;
+      }
+    }
+
+    const unitResult = satUnitForcedDecisionsFromAssignment(formulaClauses, working);
+    if (!unitResult.valid) return unitResult;
+    for (const decision of unitResult.forcedDecisions) {
+      const added = addForcedDecision(decision);
+      if (!added.valid) return added;
+    }
+
+    return { valid: true, forcedDecisions };
+  };
   const searchOptions = {
     forceDegreeTwo: true,
     allowedEdgeKeys: graph.allowedEdgeKeys || null,
@@ -3722,9 +3970,10 @@ function runSatWitnessHcDecisionSearch(prepared, formulaVariableCount, formulaCl
     scoreMethod: "importance",
     satVariableCount: variableCount,
     satPartialValidator: partialAssignmentValidator,
-    satAllDecisionCandidates: satDecisionCandidates,
+    satAllDecisionCandidates: allSatDecisionCandidates,
     satDecisionCandidateFilter: options.decisionCandidateFilter || null,
-    satForcedDecisionsAfterChoice: options.forcedDecisionsAfterChoice || null
+    satForcedDecisionsAfterChoice: forcedDecisionsAfterChoice,
+    satWitnessOnlyPropagation: options.satWitnessOnlyPropagation !== false
   };
 
   const rootEndpointLink = Array(graph.n + 1).fill(0);
@@ -3776,6 +4025,14 @@ function runSatWitnessHcDecisionSearch(prepared, formulaVariableCount, formulaCl
       if (searchOptions.satDecisionCandidateFilter) {
         remainingDecisions = remainingDecisions.filter(candidate => searchOptions.satDecisionCandidateFilter(candidate, branch.assignment, branch));
       }
+      if (remainingDecisions.length > 0) {
+        remainingDecisions = remainingDecisions.filter(candidate =>
+          satDecisionFormulaPrecheck(candidate, branch.assignment, formulaClauses, partialAssignmentValidator, branch, exactExtensionPrecheck));
+        if (remainingDecisions.length === 0) {
+          bestFailureReason = "all remaining SAT witness choices are exactly impossible";
+          break;
+        }
+      }
       if (remainingDecisions.length === 0) {
         assignmentsChecked += 1;
         if (assignmentValidator(branch.assignment, branch)) {
@@ -3812,22 +4069,48 @@ function runSatWitnessHcDecisionSearch(prepared, formulaVariableCount, formulaCl
         break;
       }
 
-      const best = ranked[0];
-      const seenConsequences = new Set();
-      const bestSignature = (() => {
-        const preview = cloneSatDecisionBranch(branch);
-        if (!applySatDecisionCandidate(preview, best.satDecision, graph, searchOptions)) return "";
-        return satAssignmentSignature(preview.assignment, variableCount);
-      })();
-      if (bestSignature) seenConsequences.add(bestSignature);
+      const branchBeforeDecision = cloneSatDecisionBranch(branch);
+      let appliedChoice = null;
+      let failedChoiceReason = "";
+      for (let optionIndex = 0; optionIndex < ranked.length; optionIndex++) {
+        const candidate = ranked[optionIndex];
+        const attempt = cloneSatDecisionBranch(branchBeforeDecision);
+        const applied =
+          applySatDecisionCandidate(attempt, candidate.satDecision, graph, searchOptions) &&
+          partialFormulaCanStillBeSatisfied(formulaClauses, attempt.assignment) &&
+          (!partialAssignmentValidator || partialAssignmentValidator(attempt.assignment, attempt));
+        if (!applied) {
+          failedChoiceReason = attempt.state.invalidReason || "SAT witness choice is exactly impossible";
+          continue;
+        }
+        branch.endpointLink = attempt.endpointLink;
+        branch.state = attempt.state;
+        branch.assignment = attempt.assignment;
+        branch.decisions = attempt.decisions;
+        branch.lastAdaptiveBeta = attempt.lastAdaptiveBeta;
+        appliedChoice = {
+          candidate,
+          optionIndex,
+          signature: satAssignmentSignature(branch.assignment, decisionVariableCount)
+        };
+        break;
+      }
+
+      if (!appliedChoice) {
+        bestFailureReason = failedChoiceReason || "no remaining SAT witness decision could be applied";
+        break;
+      }
 
       const hasBacktrackRoom = explored + queue.length < branchLimit;
       if (hasBacktrackRoom) {
-        const alternativesToKeep = ranked.length;
-        for (let optionIndex = 1; optionIndex < ranked.length && explored + queue.length < branchLimit; optionIndex++) {
+        const best = appliedChoice.candidate;
+        const seenConsequences = new Set([appliedChoice.signature]);
+        const alternativesToKeep = shouldStopAtFirstHcTour() ? 2 : ranked.length;
+        for (let optionIndex = 0; optionIndex < ranked.length && explored + queue.length < branchLimit; optionIndex++) {
+          if (optionIndex === appliedChoice.optionIndex) continue;
           const candidate = ranked[optionIndex];
           const rankedInfo = { candidate, satDecision: candidate.satDecision, best, optionIndex };
-          const alternative = prepareSatDecisionAlternative(branch, rankedInfo, graph, searchOptions, formulaClauses);
+          const alternative = prepareSatDecisionAlternative(branchBeforeDecision, rankedInfo, graph, searchOptions, formulaClauses);
           if (!alternative) continue;
           const signature = satAssignmentSignature(alternative.assignment, decisionVariableCount);
           if (seenConsequences.has(signature) || seenQueuedAssignments.has(signature)) continue;
@@ -3837,11 +4120,6 @@ function runSatWitnessHcDecisionSearch(prepared, formulaVariableCount, formulaCl
           queued += 1;
           if (seenConsequences.size > alternativesToKeep) break;
         }
-      }
-
-      if (!applySatDecisionCandidate(branch, best.satDecision, graph, searchOptions)) {
-        bestFailureReason = branch.state.invalidReason || "SAT witness choice became invalid";
-        break;
       }
     }
 
