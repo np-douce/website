@@ -107,11 +107,11 @@ S_2 = \sum_{e \in E} w_e^2
 ```
 
 ```math
-A = \sum_{\substack{e < f \\ e \cap f \neq \varnothing}} w_e w_f
+A = \sum_{e<f,\; e\cap f\neq\varnothing} w_e w_f
 ```
 
 ```math
-D = \sum_{\substack{e < f \\ e \cap f = \varnothing}} w_e w_f
+D = \sum_{e<f,\; e\cap f=\varnothing} w_e w_f
 ```
 
 Here:
@@ -138,10 +138,10 @@ Since
 
 ```math
 H(\tau)^2 =
-\left(\sum_{e \in E} w_e X_e(\tau)\right)^2
+(\sum_{e \in E} w_e X_e(\tau))^2
 =
 \sum_{e \in E} w_e^2 X_e(\tau)
-+ 2\sum_{\{e,f\}\subseteq E} w_e w_f X_e(\tau)X_f(\tau)
++ 2\sum_{e<f} w_e w_f X_e(\tau)X_f(\tau)
 ```
 
 the exact second moment is:
@@ -189,12 +189,12 @@ The conditioned mean has the form:
 ```math
 \mu_C =
 F_C
-+ \frac{1}{2r}S_{\mathrm{AA}}
-+ \frac{1}{r}S_{\mathrm{AF}}
-+ \frac{2}{r}S_{\mathrm{FF}}
++ \frac{1}{2r}S_{AA}
++ \frac{1}{r}S_{AF}
++ \frac{2}{r}S_{FF}
 ```
 
-where $S_{\mathrm{AA}}$, $S_{\mathrm{AF}}$, and $S_{\mathrm{FF}}$ are the sums of remaining edge weights in the active-active, active-free, and free-free classes.
+where $S_{AA}$, $S_{AF}$, and $S_{FF}$ are the sums of remaining edge weights in the active-active, active-free, and free-free classes.
 
 The conditioned variance uses the same idea as the unconstrained formula:
 
@@ -231,7 +231,7 @@ NP-douce also calculates statistics after some edges have already been chosen. L
 For compatible configurations, the constrained state count is:
 
 ```math
-\Omega_C = 2^{|C| - 1}\left(n - 1 + |C| - |V_C|\right)!
+\Omega_C = 2^{|C| - 1}(n - 1 + |C| - |V_C|)!
 ```
 
 where $|C|$ is the number of selected edges and $|V_C|$ is the number of vertices touched by those edges.
@@ -244,29 +244,30 @@ The constrained statistical model is:
 
 ## Edge importance
 
-For a candidate edge $e$, NP-douce compares the future solution space where the edge is selected with the future solution space where that edge is explicitly forbidden. In the app this is reported as an importance score:
+For a candidate edge $e$, NP-douce compares the constrained ensemble where the edge is chosen with the constrained ensemble where the edge is forbidden.
 
 ```math
 I_t(e)
 =
-\ln Z\!\left(CE_t\cup\{e\}\right)
+\ln Z(CE_t \cup \{e\})
 -
-\ln Z\!\left(CE_t\cup\{\operatorname{forbid}(e)\}\right)
+\ln Z(CE_t \cup \{\bar e\})
 ```
 
-Here $CE_t$ is the committed-edge state at step $t$, and $\operatorname{forbid}(e)$ means the candidate edge is excluded from the competing ensemble.
+Here $CE_t$ is the committed-edge set at step $t$, and $\bar e$ denotes that edge $e$ is forbidden.
 
-With the second-order approximation, the score measures how the candidate changes the remaining state count, mean, and variance:
+Using the second-order approximation:
 
 ```math
 I_t(e)
 \approx
-\ln\!\left(
-\frac{\Omega\!\left(CE_t\cup\{e\}\right)}
-{\Omega\!\left(CE_t\cup\{\operatorname{forbid}(e)\}\right)}
-\right)
-- \beta\Delta\mu_e
-+ \frac{\beta^2}{2}\Delta\sigma_e^2
+\ln
+\frac{\Omega(CE_t \cup \{e\})}
+{\Omega(CE_t \cup \{\bar e\})}
+-
+\beta \Delta \mu_e
++
+\frac{\beta^2}{2}\Delta \sigma_e^2
 ```
 
 The point is not just to prefer a small edge weight. The score asks how choosing that edge changes the statistical structure of the remaining Hamiltonian solution space.
@@ -276,17 +277,13 @@ The point is not just to prefer a small edge weight. The score asks how choosing
 Starting from no committed edges, the app evaluates admissible candidate edges and selects:
 
 ```math
-e_t^*
-=
-\operatorname*{arg\,max}_{e\in A_t} I_t(e)
+e_t^* = \arg\max_{e \in A_t} I_t(e)
 ```
 
 Then it updates the committed-edge set:
 
 ```math
-CE_{t+1}
-=
-CE_t\cup\{e_t^*\}
+CE_{t+1} = CE_t \cup \{e_t^*\}
 ```
 
 The admissible set is restricted so Hamiltonian feasibility is preserved, including degree constraints and prevention of premature subtours.
@@ -349,9 +346,9 @@ The HC solver now uses the importance score automatically:
 ```math
 I_t(e)
 =
-\ln Z\!\left(CE_t\cup\{e\}\right)
+\ln Z(CE_t \cup \{e\})
 -
-\ln Z\!\left(CE_t\cup\{\operatorname{forbid}(e)\}\right)
+\ln Z(CE_t \cup \{\bar e\})
 ```
 
 The older omega-only score is no longer exposed as a setting.
@@ -367,7 +364,7 @@ Score-guided backtracking is controlled by `HC backtrack tries`, which defaults 
 Candidate edges are normalized with the state function $\omega$. For each valid edge, the app uses the count term:
 
 ```math
-N(e) = 2^{CE - 1}\left(n - 1 - VCE + CE\right)!
+N(e) = 2^{CE - 1}(n - 1 - VCE + CE)!
 ```
 
 Then it computes:
