@@ -96,6 +96,13 @@ function setSparseEdgeWeight(edge, from, to, weight) {
   edge[from][to] = weight;
 }
 
+function sparseReducedHcGraphOptions() {
+  return {
+    sparseEdgeMatrix: true,
+    useAllowedEdgeAdjacency: true
+  };
+}
+
 function buildSquaredEdgeMatrix(edge, n) {
   const edgeSquared = makeMatrix(n);
   for (let i = 0; i <= n; i++) {
@@ -139,14 +146,22 @@ function attachEdgeListAdjacency(edgeList, n) {
   return edgeList;
 }
 
-function hamiltonianNecessaryGraphCheck(edge, n) {
+function hamiltonianNecessaryGraphCheck(edge, n, edgeList = null) {
   if (n < 3) return { ok: true, reason: "" };
   const adjacency = Array.from({ length: n + 1 }, () => []);
-  for (let i = 1; i < n; i++) {
-    for (let j = i + 1; j <= n; j++) {
-      if (edge[i][j] === 0) continue;
-      adjacency[i].push(j);
-      adjacency[j].push(i);
+  if (edgeList) {
+    for (const item of edgeList) {
+      if (item.weight === 0) continue;
+      adjacency[item.from].push(item.to);
+      adjacency[item.to].push(item.from);
+    }
+  } else {
+    for (let i = 1; i < n; i++) {
+      for (let j = i + 1; j <= n; j++) {
+        if (edge[i][j] === 0) continue;
+        adjacency[i].push(j);
+        adjacency[j].push(i);
+      }
     }
   }
 
@@ -2117,7 +2132,7 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
   options.candidateEdgeList = candidateEdgeList;
   const edgeSquared = null;
   if (options.hcNecessaryPrecheck) {
-    const necessary = hamiltonianNecessaryGraphCheck(edge, n);
+    const necessary = hamiltonianNecessaryGraphCheck(edge, n, options.useAllowedEdgeAdjacency ? momentEdgeList : null);
     if (!necessary.ok) {
       append(lines, `HC necessary precheck failed: ${necessary.reason}.`);
       return {
@@ -2156,6 +2171,7 @@ function solveTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
   const state = { closedChains: 0, usedVertices: 0, chosenEdgeTotal: 0, chosenEdges: [] };
   if (options.allowedEdgeKeys) state.allowedEdgeKeys = options.allowedEdgeKeys;
   if (options.allowedEdges) state.allowedEdges = options.allowedEdges;
+  state.useAllowedEdgeAdjacency = Boolean(options.useAllowedEdgeAdjacency);
   state.scoreZeroEdges = Boolean(options.scoreZeroEdges);
   let propagationAfterChoiceCount = 0;
   let propagationAfterChoiceEdges = 0;
@@ -2364,6 +2380,7 @@ function runCompressedHcDecision(graph, sourceLabel) {
     adaptiveBeta: true,
     betaMultiplier: 1,
     scoreMethod: "importance",
+    useAllowedEdgeAdjacency: Boolean(graph.useAllowedEdgeAdjacency),
     compactOutput: true
   });
   const lines = [];
@@ -2405,13 +2422,27 @@ function parsePairs(text) {
   if (nums.length % 2 !== 0) throw new Error("Pairs input needs an even count of numbers.");
   let n = 0;
   for (let i = 0; i < nums.length; i += 2) n = Math.max(n, nums[i], nums[i + 1]);
-  const edge = makeMatrix(n);
+  const edge = makeSparseEdgeMatrix(n);
+  const allowedEdgeKeys = new Set();
+  const allowedEdges = [];
   for (let i = 0; i < nums.length; i += 2) {
     const u = nums[i], v = nums[i + 1];
-    edge[u][v] = -1;
-    edge[v][u] = -1;
+    setSparseEdgeWeight(edge, u, v, -1);
+    setSparseEdgeWeight(edge, v, u, -1);
+    if (u === v) continue;
+    const key = edgeKey(u, v);
+    if (allowedEdgeKeys.has(key)) continue;
+    allowedEdgeKeys.add(key);
+    allowedEdges.push({
+      from: Math.min(u, v),
+      to: Math.max(u, v),
+      weight: -1,
+      weightSquared: 1,
+      key
+    });
   }
-  return { edge, n };
+  attachEdgeListAdjacency(allowedEdges, n);
+  return { edge, n, allowedEdgeKeys, allowedEdges };
 }
 
 function parseMatrix(text) {
@@ -4564,7 +4595,8 @@ function runVertexCoverWitnessHcDecisionSearch(graph, vertexCount, coverLimit, e
     adaptiveBeta: true,
     betaMultiplier: 1,
     scoreMethod: "importance",
-    vertexCount
+    vertexCount,
+    useAllowedEdgeAdjacency: Boolean(graph.useAllowedEdgeAdjacency)
   };
 
   const rootEndpointLink = Array(graph.n + 1).fill(0);
@@ -4574,7 +4606,8 @@ function runVertexCoverWitnessHcDecisionSearch(graph, vertexCount, coverLimit, e
     chosenEdgeTotal: 0,
     chosenEdges: [],
     allowedEdgeKeys: graph.allowedEdgeKeys,
-    allowedEdges: graph.allowedEdges
+    allowedEdges: graph.allowedEdges,
+    useAllowedEdgeAdjacency: Boolean(graph.useAllowedEdgeAdjacency)
   };
   const initialForced = propagateConfiguredForcedEdges(graph.edge, graph.n, rootEndpointLink, rootState, searchOptions);
   const capacity = forceVertexCoverCapacityConsequences(vertexCount, meta, graph.edge, rootEndpointLink, rootState);
@@ -6052,7 +6085,7 @@ function runVertexCover(text) {
     return lines.join("\n");
   }
 
-  const graph = buildDirectVertexCoverHcGraph(reduced.n, reduced.k, reduced.edges, padding);
+  const graph = buildDirectVertexCoverHcGraph(reduced.n, reduced.k, reduced.edges, padding, sparseReducedHcGraphOptions());
 
   appendVertexCoverWitnessHcReduction(lines, graph, reduced.n, reduced.k, reduced.edges, "Vertex Cover", "YES", "NO", search => {
     const limit = witnessDisplayLimit();
@@ -6079,7 +6112,9 @@ function runClique(text) {
   const reduced = reduceCliqueByCore(n, k, edges);
   const complementEdges = buildComplementEdges(reduced.n, reduced.edges);
   const vertexCoverK = reduced.n - k;
-  const graph = vertexCoverK >= 0 ? buildDirectVertexCoverHcGraph(reduced.n, vertexCoverK, complementEdges, padding) : null;
+  const graph = vertexCoverK >= 0
+    ? buildDirectVertexCoverHcGraph(reduced.n, vertexCoverK, complementEdges, padding, sparseReducedHcGraphOptions())
+    : null;
   if (graph && graph.vertexCoverPropagation) {
     graph.vertexCoverPropagation.witnessKind = "clique";
     graph.vertexCoverPropagation.witnessTargetSize = k;
@@ -6135,7 +6170,9 @@ function runIndependentSet(text) {
   const { n, k, padding, edges } = parseIndependentSet(text);
   const reduced = reduceIndependentSetByCore(n, k, edges);
   const vertexCoverK = reduced.n - k;
-  const graph = vertexCoverK >= 0 ? buildDirectVertexCoverHcGraph(reduced.n, vertexCoverK, reduced.edges, padding) : null;
+  const graph = vertexCoverK >= 0
+    ? buildDirectVertexCoverHcGraph(reduced.n, vertexCoverK, reduced.edges, padding, sparseReducedHcGraphOptions())
+    : null;
   if (graph && graph.vertexCoverPropagation) {
     graph.vertexCoverPropagation.witnessKind = "independentSet";
     graph.vertexCoverPropagation.witnessTargetSize = k;
@@ -6224,10 +6261,7 @@ function runSetCover(text) {
   }
 
   const sat = setCoverTo3Sat(reduced.universeSize, reduced.setCount, reduced.k, reduced.sets);
-  const prepared = prepareSatViaVertexCoverForHc(sat, padding, getHcSolveNodeLimit(), {
-    sparseEdgeMatrix: true,
-    useAllowedEdgeAdjacency: true
-  });
+  const prepared = prepareSatViaVertexCoverForHc(sat, padding, getHcSolveNodeLimit(), sparseReducedHcGraphOptions());
   appendSatViaVertexCoverHcReduction(lines, prepared, "Set Cover via 3-SAT -> Vertex Cover -> direct HC", "Set Cover", "YES", "NO", search => {
     const limit = witnessDisplayLimit();
     const covers = search.satisfyingAssignments
@@ -6303,7 +6337,7 @@ function runX3c(text) {
   }
 
   const sat = x3cTo3Sat(reduced.universeSize, reduced.setCount, reduced.sets);
-  const prepared = prepareSatViaVertexCoverForHc(sat, padding);
+  const prepared = prepareSatViaVertexCoverForHc(sat, padding, getHcSolveNodeLimit(), sparseReducedHcGraphOptions());
   appendSatViaVertexCoverHcReduction(lines, prepared, "X3C via 3-SAT -> Vertex Cover -> direct HC", "X3C", "YES", "NO", search => {
     const limit = witnessDisplayLimit();
     const exactCovers = search.satisfyingAssignments
@@ -6553,7 +6587,7 @@ function runGraphColoring(text) {
   }
 
   const sat = graphColoringTo3Sat(reduced.n, colorCount, reduced.edges);
-  const prepared = prepareSatViaVertexCoverForHc(sat, padding);
+  const prepared = prepareSatViaVertexCoverForHc(sat, padding, getHcSolveNodeLimit(), sparseReducedHcGraphOptions());
 
   appendSatViaVertexCoverHcReduction(lines, prepared, "Graph Coloring via 3-SAT -> Vertex Cover -> direct HC", "Graph Coloring", "YES", "NO", search => {
     const limit = witnessDisplayLimit();
@@ -7287,7 +7321,7 @@ function simplify3SatForHc(variableCount, clauses) {
 
 function run3SatCompressed(text) {
   const { variableCount, clauseCount, padding, clauses } = parse3Sat(text);
-  const prepared = prepareSatViaVertexCoverForHc({ variableCount, clauses }, padding);
+  const prepared = prepareSatViaVertexCoverForHc({ variableCount, clauses }, padding, getHcSolveNodeLimit(), sparseReducedHcGraphOptions());
   const lines = [];
   if (prepared.simplified.contradiction) {
     append(lines, "Final answer:");
@@ -7520,10 +7554,13 @@ if (document.getElementById("packingCanvas")) {
   document.getElementById("runPacking3d").addEventListener("click", () => runSafely(() => runPacking3d()));
 }
 document.getElementById("runPairs").addEventListener("click", () => runSafely(() => {
-  const { edge, n } = parsePairs(document.getElementById("pairsInput").value);
+  const { edge, n, allowedEdgeKeys, allowedEdges } = parsePairs(document.getElementById("pairsInput").value);
   return runTrackingSolver(edge, n, NaN, "browser pairs input", {
     hcNecessaryPrecheck: true,
     forceDegreeTwo: true,
+    allowedEdgeKeys,
+    allowedEdges,
+    useAllowedEdgeAdjacency: true,
     completeWithNeutralEdges: false,
     requireNonzeroFinalEdge: true,
     repairPasses: 0,
