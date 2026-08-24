@@ -45,10 +45,30 @@ The variance uses edge-pair counting instead of tour enumeration. Here $S_2$ is 
 - \mu^2
 ```
 
-After some edges are committed, the app recomputes the same kind of statistics for the constrained Hamiltonian ensemble. For compatible committed edges:
+After some edges are committed, the app recomputes the same kind of statistics for the constrained Hamiltonian ensemble. Let $q_C$ be the number of committed path components and let $V_C$ be the vertices touched by those components:
 
 ```math
-\Omega_C = 2^{|C| - 1}(n - 1 + |C| - |V_C|)!
+\Omega_C = 2^{q_C - 1}(n - 1 + q_C - |V_C|)!
+```
+
+The count entropy is:
+
+```math
+S_C = \ln \Omega_C
+```
+
+For the compatible tour ensemble $H_C$, the constrained mean and variance are:
+
+```math
+\mu_C =
+\frac{1}{\Omega_C}
+\sum_{T \in H_C} w(T)
+```
+
+```math
+\sigma_C^2 =
+\frac{1}{\Omega_C}
+\sum_{T \in H_C} (w(T) - \mu_C)^2
 ```
 
 The partition approximation used for scoring is:
@@ -77,6 +97,24 @@ and commits it:
 
 ```math
 CE_{t+1} = CE_t \cup \{e_t^*\}
+```
+
+The displayed edge probabilities are normalized from the current scores:
+
+```math
+p_t(e) =
+\frac{\exp(I_t(e) - M_t)}
+{\sum_{f \in A_t}\exp(I_t(f) - M_t)}
+```
+
+```math
+M_t = \max_{f \in A_t} I_t(f)
+```
+
+The probability entropy of that choice distribution is:
+
+```math
+H_t = -\sum_{e \in A_t} p_t(e)\ln p_t(e)
 ```
 
 For reduction tabs, the final Hamiltonian witness is translated back into the original problem. For example, a Clique reduction displays the inferred clique, not just an HC tour.
