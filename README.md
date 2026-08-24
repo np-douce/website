@@ -1,6 +1,6 @@
 # NP-douce 1.2
 
-**NP-douce** is an experimental research application for exploring combinatorial optimization problems using ideas from statistical mechanics, exact combinatorial counting, and constrained solution-space analysis. It treats NP-complete problems as statistical ensembles and computes aggregate properties without full enumeration.
+**NP-douce** is an experimental research application for exploring combinatorial optimization problems using ideas from statistical mechanics, exact combinatorial counting, and constrained solution-sp[...]
 
 Open `index.html` in a browser to run the app.
 
@@ -44,7 +44,7 @@ Rather than enumerating every tour, the app computes aggregate properties of the
 - candidate-edge importance scores
 - iterative construction of a Hamiltonian tour or reduced-problem witness
 
-Through polynomial-time reductions, the same Hamiltonian-cycle framework is used for 3-SAT, Vertex Cover, Clique, Independent Set, Set Cover, X3C, and Graph Coloring. The app should still be treated as experimental software for research purposes.
+Through polynomial-time reductions, the same Hamiltonian-cycle framework is used for 3-SAT, Vertex Cover, Clique, Independent Set, Set Cover, X3C, and Graph Coloring. The app should still be treat[...]
 
 ## Statistical-mechanical model
 
@@ -107,12 +107,16 @@ S_2 = \sum_{e \in E} w_e^2
 ```
 
 ```math
-A = \sum_{e<f,\; e\cap f\neq\varnothing} w_e w_f
+A = \sum w_e w_f
 ```
 
+where the sum for `A` is over pairs of distinct edges that share a vertex.
+
 ```math
-D = \sum_{e<f,\; e\cap f=\varnothing} w_e w_f
+D = \sum w_e w_f
 ```
+
+where the sum for `D` is over pairs of distinct edges that do not share a vertex.
 
 Here:
 
@@ -172,7 +176,7 @@ Finally:
 
 This is why the app can calculate the variance without enumerating the `(n-1)!/2` Hamiltonian cycles. It only needs to scan edges and classify edge pairs by whether they touch or are disjoint.
 
-During tour construction the variance is recalculated after some edges have already been committed. The same principle is used, but the remaining graph is no longer a clean unconstrained `K_n` ensemble. The code classifies remaining edges into three categories by their endpoint status:
+During tour construction the variance is recalculated after some edges have already been committed. The same principle is used, but the remaining graph is no longer a clean unconstrained `K_n` en[...]
 
 - **free-free**: both endpoints are unused.
 - **active-free**: one endpoint is an open chain endpoint and the other is unused.
@@ -202,7 +206,7 @@ The conditioned variance uses the same idea as the unconstrained formula:
 \sigma_C^2 = \langle (H - F_C)^2 \rangle_C - (\mu_C - F_C)^2
 ```
 
-The app computes `⟨(H - F_C)²⟩_C` by bucketed edge-pair products: active-active pairs, active-free touching pairs, active-free disjoint pairs, free-free touching pairs, and free-free disjoint pairs.
+The app computes `⟨(H - F_C)²⟩_C` by bucketed edge-pair products: active-active pairs, active-free touching pairs, active-free disjoint pairs, free-free touching pairs, and free-free disjoin[...]
 
 ## Partition-function approximation
 
@@ -288,7 +292,7 @@ CE_{t+1} = CE_t \cup \{e_t^*\}
 
 The admissible set is restricted so Hamiltonian feasibility is preserved, including degree constraints and prevention of premature subtours.
 
-For reduction tabs, the displayed answer is inferred back into the original problem. For example, a Hamiltonian witness produced by a Clique reduction is translated back into a clique such as `{1, 2, 3}`.
+For reduction tabs, the displayed answer is inferred back into the original problem. For example, a Hamiltonian witness produced by a Clique reduction is translated back into a clique such as `{1[...]
 
 ## Conceptual flow
 
@@ -321,7 +325,7 @@ Hamiltonian tour or inferred original-problem answer
 
 The Hamiltonian/TSP theory calculations are ported from the C++ formulas using JavaScript `Number`, which is IEEE-754 double precision like C++ `double`.
 
-Large Hamiltonian graphs can still be expensive because the original theory includes nested pair/edge calculations. Matrix, points, manual, and pair inputs do not have a fixed app maximum; their practical limit depends on browser resources and available time.
+Large Hamiltonian graphs can still be expensive because the original theory includes nested pair/edge calculations. Matrix, points, manual, and pair inputs do not have a fixed app maximum; their [...]
 
 Reduction tabs now use this strict flow for their displayed answer:
 
@@ -329,17 +333,17 @@ Reduction tabs now use this strict flow for their displayed answer:
 original problem → reduction → HC graph → NP-douce HC solver → inferred original answer
 ```
 
-When the HC solver returns YES, reduction tabs print concrete original-problem witnesses, such as SAT assignments, vertex covers, cliques, independent sets, selected sets, or colorings. The displayed answer is always a direct inference from the HC tour.
+When the HC solver returns YES, reduction tabs print concrete original-problem witnesses, such as SAT assignments, vertex covers, cliques, independent sets, selected sets, or colorings. The displ[...]
 
-The raw Hamiltonian Pairs tab keeps scoring restricted to real `-1` HC edges. Before scoring, it applies only necessary HC facts: every vertex must have at least two usable HC edges, the usable graph must be connected, and the degree-2 precheck must pass.
+The raw Hamiltonian Pairs tab keeps scoring restricted to real `-1` HC edges. Before scoring, it applies only necessary HC facts: every vertex must have at least two usable HC edges, the usable g[...]
 
-The TSP Points tab keeps the same score-guided method, then applies the Euclidean no-crossing fact to remove crossing edges from a completed points tour. Matrix and manual TSP inputs are not given Euclidean constraints.
+The TSP Points tab keeps the same score-guided method, then applies the Euclidean no-crossing fact to remove crossing edges from a completed points tour. Matrix and manual TSP inputs are not give[...]
 
-If the reduced HC graph is above the app's `HC solve node limit`, the tab reports `NOT COMPUTED` instead of using a separate direct solver. Raise the limit when you want to force a larger reduced HC instance to be solved.
+If the reduced HC graph is above the app's `HC solve node limit`, the tab reports `NOT COMPUTED` instead of using a separate direct solver. Raise the limit when you want to force a larger reduced[...]
 
-Reduction tabs run the HC solver over the full set of real allowed HC edges from the start. They still skip zero-weight non-edges, because those cannot contribute to the target `-n` Hamiltonian tour weight.
+Reduction tabs run the HC solver over the full set of real allowed HC edges from the start. They still skip zero-weight non-edges, because those cannot contribute to the target `-n` Hamiltonian t[...]
 
-Before a generated 3-SAT formula is sent to Vertex Cover, reduction tabs run exact unit-clause simplification. A clause like `[-3, -3, -3]` is treated as the unit clause `~x3`, so `x3=false` is forced immediately.
+Before a generated 3-SAT formula is sent to Vertex Cover, reduction tabs run exact unit-clause simplification. A clause like `[-3, -3, -3]` is treated as the unit clause `~x3`, so `x3=false` is f[...]
 
 The HC solver now uses the importance score automatically:
 
@@ -359,7 +363,7 @@ Adaptive beta is automatic. Each choice step recomputes the current conditioned 
 \beta = \frac{1}{\sigma_C}
 ```
 
-Score-guided backtracking is controlled by `HC backtrack tries`, which defaults to `0`. On SAT-based reduction tabs, `0` means one greedy SAT witness branch with no saved alternatives; raising the value enables backtracking to explore alternative branches.
+Score-guided backtracking is controlled by `HC backtrack tries`, which defaults to `0`. On SAT-based reduction tabs, `0` means one greedy SAT witness branch with no saved alternatives; raising th[...]
 
 Candidate edges are normalized with the state function `ω`. For each valid edge, the app uses the count term:
 
@@ -381,9 +385,9 @@ P(e) = \frac{e^{L(e)-M}}{\omega},
 \omega = \sum_f e^{L(f)-M}
 ```
 
-Before scoring, the raw HC solver runs necessary graph checks and the original degree-2 forced-edge precheck: if a vertex has exactly two listed HC edges, both are forced into the tour before the loop score begins.
+Before scoring, the raw HC solver runs necessary graph checks and the original degree-2 forced-edge precheck: if a vertex has exactly two listed HC edges, both are forced into the tour before the[...]
 
-`TSP repair passes` appears only inside the matrix, points, and manual TSP tabs. It defaults to `0`. When raised, it runs local repair only after weighted TSP tours are built. Reduction tabs and raw Hamilton pairs tab do not use TSP repair.
+`TSP repair passes` appears only inside the matrix, points, and manual TSP tabs. It defaults to `0`. When raised, it runs local repair only after weighted TSP tours are built. Reduction tabs and [...]
 
 ## 3-SAT input format
 
@@ -435,13 +439,13 @@ Each following line is one undirected edge:
 2 3
 ```
 
-The app uses the direct classic Vertex Cover to Hamiltonian Cycle construction. Each original graph edge becomes a 12-node gadget with endpoint rows and crosses `u1-v3`, `v1-u3`, `u6-v4`, and `u4-v6`.
+The app uses the direct classic Vertex Cover to Hamiltonian Cycle construction. Each original graph edge becomes a 12-node gadget with endpoint rows and crosses `u1-v3`, `v1-u3`, `u6-v4`, and `u4[...]
 
-Incident rows for the same original vertex are linked as `u6 → next u1`, so the degree-2 precheck collapses most of each gadget before the remaining selector and cross edges are scored by the HC solver.
+Incident rows for the same original vertex are linked as `u6 → next u1`, so the degree-2 precheck collapses most of each gadget before the remaining selector and cross edges are scored by the H[...]
 
-On the 3-SAT tab and the tabs that pass through generated 3-SAT, the browser now scores SAT witness choices first. For `V` checked Boolean decision variables, that means `2V` logical witness choices.
+On the 3-SAT tab and the tabs that pass through generated 3-SAT, the browser now scores SAT witness choices first. For `V` checked Boolean decision variables, that means `2V` logical witness choi[...]
 
-The direct Vertex Cover tab now uses the same witness-choice pattern. For `n` original vertices, it scores `2n` logical choices: `cover(v)` and `not cover(v)`. Clique and Independent Set inherit this method through their reductions.
+The direct Vertex Cover tab now uses the same witness-choice pattern. For `n` original vertices, it scores `2n` logical choices: `cover(v)` and `not cover(v)`. Clique and Independent Set inherit [...]
 
 Node count for this direct reduction is roughly:
 
@@ -517,7 +521,7 @@ Example:
 4 5
 ```
 
-This example has an independent set `{1, 3, 5}`. Because this route goes directly to Vertex Cover on the same graph, it avoids an extra complement graph step before the Hamiltonian-cycle calculation.
+This example has an independent set `{1, 3, 5}`. Because this route goes directly to Vertex Cover on the same graph, it avoids an extra complement graph step before the Hamiltonian-cycle calculat[...]
 
 ## Set Cover input format
 
@@ -587,7 +591,7 @@ Example:
 2 3 6
 ```
 
-This example has an exact cover `{S1, S2}`. The 3-SAT encoding uses one Boolean variable per 3-set, one at-least-one coverage clause for each universe element, and pairwise not-both clauses for every pair of 3-sets.
+This example has an exact cover `{S1, S2}`. The 3-SAT encoding uses one Boolean variable per 3-set, one at-least-one coverage clause for each universe element, and pairwise not-both clauses for e[...]
 
 ## Graph Coloring input format
 
@@ -634,7 +638,7 @@ Example 4-colorable instance:
 3 4
 ```
 
-That second graph is `K4`: it is not 3-colorable, but it is 4-colorable. The 3-SAT encoding uses `colors * vertices` base variables, one at-least-one-color clause per vertex, pairwise not-both color clauses, and one pairwise must-differ clause per edge.
+That second graph is `K4`: it is not 3-colorable, but it is 4-colorable. The 3-SAT encoding uses `colors * vertices` base variables, one at-least-one-color clause per vertex, pairwise not-both co[...]
 
 ## Repository structure
 
@@ -678,7 +682,7 @@ Once cached, supported browsers may allow the app to keep working offline, subje
 
 NP-douce is an experimental research prototype and reference implementation.
 
-The project is intended to support experimentation, verification, benchmarking, and visualization of the mathematical framework. Results from the software should be independently verified when used for publication or decision-making purposes.
+The project is intended to support experimentation, verification, benchmarking, and visualization of the mathematical framework. Results from the software should be independently verified when us[...]
 
 ## Goals
 
@@ -719,4 +723,4 @@ Independent research in combinatorial optimization, Hamiltonian problems, and st
 
 ## Disclaimer
 
-This repository contains experimental research software. The implementation and numerical experiments are intended for research and educational purposes. Computational demonstrations should not be construed as benchmarks or production guarantees without independent verification and appropriate scaling analysis.
+This repository contains experimental research software. The implementation and numerical experiments are intended for research and educational purposes. Computational demonstrations should not b[...]
