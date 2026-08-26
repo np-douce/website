@@ -96,6 +96,34 @@ function setSparseEdgeWeight(edge, from, to, weight) {
   edge[from][to] = weight;
 }
 
+function getEdgeWeight(edge, from, to) {
+  return edge[from][to];
+}
+
+function hasEdge(edge, from, to) {
+  return getEdgeWeight(edge, from, to) !== 0;
+}
+
+function forEachStoredUndirectedEdge(edge, n, callback) {
+  if (edge.sparseRows) {
+    for (let from = 1; from <= n; from++) {
+      for (const [to, weight] of edge.sparseRows[from]) {
+        if (to <= from || to > n || weight === 0) continue;
+        callback(from, to, weight);
+      }
+    }
+    return;
+  }
+
+  for (let from = 1; from < n; from++) {
+    for (let to = from + 1; to <= n; to++) {
+      const weight = getEdgeWeight(edge, from, to);
+      if (weight === 0) continue;
+      callback(from, to, weight);
+    }
+  }
+}
+
 function sparseReducedHcGraphOptions() {
   return {
     sparseEdgeMatrix: true,
@@ -104,10 +132,17 @@ function sparseReducedHcGraphOptions() {
 }
 
 function buildSquaredEdgeMatrix(edge, n) {
-  const edgeSquared = makeMatrix(n);
-  for (let i = 0; i <= n; i++) {
-    for (let j = 0; j <= n; j++) {
-      edgeSquared[i][j] = edge[i][j] * edge[i][j];
+  const edgeSquared = edge.sparseRows ? makeSparseEdgeMatrix(n) : makeMatrix(n);
+  if (edge.sparseRows) {
+    forEachStoredUndirectedEdge(edge, n, (from, to, weight) => {
+      setSparseEdgeWeight(edgeSquared, from, to, weight * weight);
+      setSparseEdgeWeight(edgeSquared, to, from, weight * weight);
+    });
+  } else {
+    for (let i = 0; i <= n; i++) {
+      for (let j = 0; j <= n; j++) {
+        edgeSquared[i][j] = edge[i][j] * edge[i][j];
+      }
     }
   }
   return edgeSquared;
@@ -115,19 +150,15 @@ function buildSquaredEdgeMatrix(edge, n) {
 
 function buildNonzeroEdgeList(edge, n) {
   const edgeList = [];
-  for (let i = 1; i < n; i++) {
-    for (let j = i + 1; j <= n; j++) {
-      const weight = edge[i][j];
-      if (weight === 0) continue;
-      edgeList.push({
-        from: i,
-        to: j,
-        weight,
-        weightSquared: weight * weight,
-        key: edgeKey(i, j)
-      });
-    }
-  }
+  forEachStoredUndirectedEdge(edge, n, (from, to, weight) => {
+    edgeList.push({
+      from,
+      to,
+      weight,
+      weightSquared: weight * weight,
+      key: edgeKey(from, to)
+    });
+  });
   return attachEdgeListAdjacency(edgeList, n);
 }
 
@@ -156,13 +187,10 @@ function hamiltonianNecessaryGraphCheck(edge, n, edgeList = null) {
       adjacency[item.to].push(item.from);
     }
   } else {
-    for (let i = 1; i < n; i++) {
-      for (let j = i + 1; j <= n; j++) {
-        if (edge[i][j] === 0) continue;
-        adjacency[i].push(j);
-        adjacency[j].push(i);
-      }
-    }
+    forEachStoredUndirectedEdge(edge, n, (from, to) => {
+      adjacency[from].push(to);
+      adjacency[to].push(from);
+    });
   }
 
   for (let vertex = 1; vertex <= n; vertex++) {
@@ -740,14 +768,24 @@ function collectCandidateEdges(n, edge, endpointLink, state, candidateEdgeKeys =
       candidateEdges.push({ from, to });
     }
   } else {
-    for (let i = 1; i <= n - 1; i++) {
-      if (endpointLink[i] === -1) continue;
-      for (let j = i + 1; j <= n; j++) {
-        if (endpointLink[j] === -1 || endpointLink[i] === j || endpointLink[j] === i ||
-            (!state.scoreZeroEdges && edge[i][j] === 0)) {
-          continue;
+    if (!state.scoreZeroEdges && edge.sparseRows) {
+      forEachStoredUndirectedEdge(edge, n, (from, to) => {
+        if (endpointLink[from] === -1 || endpointLink[to] === -1 ||
+            endpointLink[from] === to || endpointLink[to] === from) {
+          return;
         }
-        candidateEdges.push({ from: i, to: j });
+        candidateEdges.push({ from, to });
+      });
+    } else {
+      for (let i = 1; i <= n - 1; i++) {
+        if (endpointLink[i] === -1) continue;
+        for (let j = i + 1; j <= n; j++) {
+          if (endpointLink[j] === -1 || endpointLink[i] === j || endpointLink[j] === i ||
+              (!state.scoreZeroEdges && edge[i][j] === 0)) {
+            continue;
+          }
+          candidateEdges.push({ from: i, to: j });
+        }
       }
     }
   }
@@ -914,10 +952,9 @@ function findBestScoringEdge(n, edge, edgeSquared, endpointLink, state, beta, ca
 function findForcedFinalEdge(n, endpointLink, edge) {
   for (let i = 1; i <= n; i++) {
     if (endpointLink[i] === -1) continue;
-    for (let j = i + 1; j <= n; j++) {
-      if (endpointLink[j] !== -1 && endpointLink[i] === j && endpointLink[j] === i) {
-        return { exists: true, from: i, to: j, weight: edge[i][j] };
-      }
+    const j = endpointLink[i];
+    if (j > i && j <= n && endpointLink[j] === i) {
+      return { exists: true, from: i, to: j, weight: edge[i][j] };
     }
   }
   return { exists: false, from: 0, to: 0, weight: 0 };
