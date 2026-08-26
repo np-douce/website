@@ -74,6 +74,15 @@ p {
   color: var(--muted);
 }
 
+.benchmarkMeta {
+  margin: 8px 0 10px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--gold);
+  background: rgba(244, 180, 79, 0.08);
+  color: #d9e2ea;
+  font-size: 13px;
+}
+
 .topbar p {
   max-width: 680px;
 }

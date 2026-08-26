@@ -462,6 +462,24 @@ README.md
 
 The `*_input.txt` files are example inputs for the problem tabs. The app is static and can run from the local folder or from GitHub Pages.
 
+## Benchmark examples
+
+The default examples use small benchmark or benchmark-format instances so they stay reproducible while fitting the browser solver's default `HC solve node limit` of `20000`.
+
+| Page | Source | Instance | Size | Expected answer / optimum | Conversion notes |
+| --- | --- | --- | --- | --- | --- |
+| 3-SAT | SATLIB uf20-91 family, https://www.cs.ubc.ca/~hoos/SATLIB/benchm.html | uf20-01.cnf | 20 variables, 91 clauses | SAT | DIMACS trailing zeros are removed from each clause. Set `HC backtrack tries` to `2` before running this example. |
+| Vertex Cover | DIMACS COLOR graph source, https://mat.gsia.cmu.edu/COLOR/instances.html | myciel3.col | 11 vertices, 20 edges, k=6 | YES; k=5 is NO | DIMACS `p/e` prefixes are removed; same edge list is used directly. |
+| Clique | DIMACS COLOR graph source, https://mat.gsia.cmu.edu/COLOR/instances.html | complement of myciel3.col | 11 vertices, 35 edges, k=5 | YES; k=6 is NO | DIMACS `p/e` prefixes are removed, then the graph is complemented for the input so the clique threshold is nontrivial. |
+| Independent Set | DIMACS COLOR graph source, https://mat.gsia.cmu.edu/COLOR/instances.html | myciel3.col | 11 vertices, 20 edges, k=5 | YES; k=6 is NO | DIMACS `p/e` prefixes are removed; same edge list is used directly. |
+| Set Cover | Beasley OR-Library set covering reference, https://people.brunel.ac.uk/~mastjjb/jeb/orlib/scpinfo.html | small set-covering incidence example | 7 elements, 7 sets, k=3 | Optimum 3; YES for k=3 | Row/column incidence is transposed into the app's one-set-per-line format. |
+| X3C | Karp exact-cover-by-3-sets problem family | canonical X3C teaching instance | 6 elements, 4 triples | YES, exact cover S1 and S2 | No tiny directly compatible library file is bundled; the current example is kept and labelled. |
+| Graph Coloring | DIMACS COLOR graph source, https://mat.gsia.cmu.edu/COLOR/instances.html | myciel3.col | 11 vertices, 20 edges, 4 colors | Chromatic number 4; YES for 4 colors and NO for 3 | DIMACS `p/e` prefixes are removed; same edge list is used directly. |
+| Hamiltonian Pairs | DIMACS COLOR graph source, https://mat.gsia.cmu.edu/COLOR/instances.html | myciel3.col as an HC graph | 11 vertices, 20 edges | YES; one cycle is 1-2-6-4-10-3-7-11-8-5-9-1 | DIMACS edge list is loaded as raw allowed Hamiltonian edges. |
+| TSP Matrix | TSPLIB95, https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/ | gr17 | 17 cities | Optimum tour length 2085 | TSPLIB lower-diagonal matrix is expanded to the app's full symmetric matrix. |
+| TSP Points | TSPLIB95, https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/ | burma14 | 14 coordinates | Official TSPLIB GEO optimum is not used for Euclidean app scoring | Coordinates are copied into the app's Euclidean points format. |
+| TSP Manual | TSPLIB95, https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/ | gr17 | 17 cities | Optimum tour length 2085 | Same matrix as the Matrix tab, flattened into upper-triangle manual order. |
+
 ## Running the browser version
 
 For local use, open `index.html` in a browser. For hosted use, serve the folder with GitHub Pages or any static-file server.

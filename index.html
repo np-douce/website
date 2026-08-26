@@ -49,7 +49,7 @@
 
     <section class="appBody">
       <div class="globalControls">
-        <label>HC solve node limit<input id="hcSolveNodeLimit" type="number" min="0" step="1" value="1000"></label>
+        <label>HC solve node limit<input id="hcSolveNodeLimit" type="number" min="0" step="1" value="20000"></label>
         <label>HC backtrack tries<input id="hcBacktrackTries" type="number" min="0" max="500" step="1" value="0"></label>
         <label class="switchLine">Search all answers<input id="hcSearchAllAnswers" type="checkbox" checked><span class="switchTrack"></span></label>
         <p class="fieldNote">Importance scoring and adaptive beta are automatic. Reduction tabs infer answers only when the reduced HC graph is at or under this limit. Backtracking retries next-best scored branches.</p>
@@ -62,13 +62,104 @@
           <p>Uses the classic 3-SAT to Vertex Cover triangle reduction, then the direct Hamiltonian-cycle gadget with the degree-2 forced-edge precheck. The optional third number on the first line adds forced padding nodes.</p>
         </div>
         <label>3-SAT data</label>
-        <textarea id="satInput" spellcheck="false">5 6
-1 2 3
--1 2 4
-1 -3 5
--2 3 4
--1 -4 5
-2 -3 -5</textarea>
+        <p class="benchmarkMeta">Benchmark: SATLIB uf20-91, instance uf20-01.cnf, DIMACS CNF converted to app 3-literal rows, expected SAT. Set HC backtrack tries to 2 before running this example.</p>
+        <textarea id="satInput" spellcheck="false"># SATLIB uf20-91, instance uf20-01.cnf
+# Source: https://www.cs.ubc.ca/~hoos/SATLIB/benchm.html
+# Copy used for exact clauses: https://github.com/mitchellh/go-sat/blob/master/testdata/satlib/sat-uniform-20-91/uf20-01.cnf
+# Original format: DIMACS CNF, p cnf 20 91; conversion removes trailing 0 from each clause.
+# Expected original answer: SAT
+20 91
+4 -18 19
+3 18 -5
+-5 -8 -15
+-20 7 -16
+10 -13 -7
+-12 -9 17
+17 19 5
+-16 9 15
+11 -5 -14
+18 -10 13
+-3 11 12
+-6 -17 -8
+-18 14 1
+-19 -15 10
+12 18 -19
+-8 4 7
+-8 -9 4
+7 17 -15
+12 -7 -14
+-10 -11 8
+2 -15 -11
+9 6 1
+-11 20 -17
+9 -15 13
+12 -7 -17
+-18 -2 20
+20 12 4
+19 11 14
+-16 18 -4
+-1 -17 -19
+-13 15 10
+-12 -14 -13
+12 -14 -7
+-7 16 10
+6 10 7
+20 14 -16
+-19 17 11
+-7 1 -20
+-5 12 15
+-4 -9 -13
+12 -11 -7
+-5 19 -8
+1 16 17
+20 -14 -15
+13 -4 10
+14 7 10
+-5 9 20
+10 1 -19
+-16 -15 -1
+16 3 -11
+-15 -10 4
+4 -15 -3
+-10 -16 11
+-8 12 -5
+14 -6 12
+1 6 11
+-13 -5 -1
+-7 -2 12
+1 -20 19
+-2 -13 -8
+15 18 4
+-11 14 9
+-6 -15 -2
+5 -12 -15
+-6 17 5
+-13 5 -19
+20 -1 14
+9 -17 15
+-5 19 -18
+-12 8 -10
+-18 14 -4
+15 -9 13
+9 -5 -1
+10 -19 -14
+20 9 4
+-9 -2 19
+-5 13 -17
+2 -10 -18
+-18 3 11
+7 -9 17
+-15 -6 -3
+-2 3 -13
+12 3 -2
+-2 -3 17
+20 -15 -16
+-5 -17 -19
+-20 -18 11
+-9 1 -5
+-19 9 17
+12 -2 17
+4 -16 -5</textarea>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="satFile" accept=".txt"></label>
           <button id="runSat">Run 3-SAT reduction</button>
@@ -81,17 +172,28 @@
           <p>First line is <code>vertices k optional_padding</code>, then one undirected edge per line. Example: <code>12 4</code> followed by edge pairs.</p>
         </div>
         <label>Vertex cover data</label>
-        <textarea id="vcInput" spellcheck="false">12 4
-3 4
-4 11
-1 12
-5 10
+        <p class="benchmarkMeta">Benchmark: DIMACS COLOR myciel3.col graph, converted to Vertex Cover with k=6, expected YES; k=5 is NO.</p>
+        <textarea id="vcInput" spellcheck="false">11 6
+1 2
+1 4
+1 7
+1 9
 2 3
-6 1
-7 4
-8 5
-9 1
-3 9</textarea>
+2 6
+2 8
+3 5
+3 7
+3 10
+4 5
+4 6
+4 10
+5 8
+5 9
+6 11
+7 11
+8 11
+9 11
+10 11</textarea>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="vcFile" accept=".txt"></label>
           <button id="runVc">Run vertex cover reduction</button>
@@ -104,42 +206,33 @@
           <p>First line is <code>vertices k optional_padding</code>, then one undirected edge per line. Example: <code>50 10</code> followed by the clique edge pairs.</p>
         </div>
         <label>Clique data</label>
-        <textarea id="cliqueInput" spellcheck="false">50 10
-1 2
+        <p class="benchmarkMeta">Benchmark: complement of DIMACS COLOR myciel3.col graph, clique threshold k=5, expected YES; k=6 is NO.</p>
+        <textarea id="cliqueInput" spellcheck="false">11 5
 1 3
-1 4
 1 5
 1 6
-1 7
 1 8
-1 9
 1 10
-2 3
+1 11
 2 4
 2 5
-2 6
 2 7
-2 8
 2 9
 2 10
+2 11
 3 4
-3 5
 3 6
-3 7
 3 8
 3 9
-3 10
-4 5
-4 6
+3 11
 4 7
 4 8
 4 9
-4 10
+4 11
 5 6
 5 7
-5 8
-5 9
 5 10
+5 11
 6 7
 6 8
 6 9
@@ -162,112 +255,28 @@
           <p>First line is <code>vertices k optional_padding</code>, then one undirected edge per line. Example: <code>16 6</code> followed by edge pairs.</p>
         </div>
         <label>Independent set data</label>
-        <textarea id="isInput" spellcheck="false">16 6
+        <p class="benchmarkMeta">Benchmark: DIMACS COLOR myciel3.col graph, independent-set threshold k=5, expected YES; k=6 is NO.</p>
+        <textarea id="isInput" spellcheck="false">11 5
+1 2
+1 4
 1 7
-1 8
 1 9
-1 10
-1 11
-1 12
-1 13
-1 14
-1 15
-1 16
-2 7
+2 3
+2 6
 2 8
-2 9
-2 10
-2 11
-2 12
-2 13
-2 14
-2 15
-2 16
+3 5
 3 7
-3 8
-3 9
 3 10
-3 11
-3 12
-3 13
-3 14
-3 15
-3 16
-4 7
-4 8
-4 9
+4 5
+4 6
 4 10
-4 11
-4 12
-4 13
-4 14
-4 15
-4 16
-5 7
 5 8
 5 9
-5 10
-5 11
-5 12
-5 13
-5 14
-5 15
-5 16
-6 7
-6 8
-6 9
-6 10
 6 11
-6 12
-6 13
-6 14
-6 15
-6 16
-7 8
-7 9
-7 10
 7 11
-7 12
-7 13
-7 14
-7 15
-7 16
-8 9
-8 10
 8 11
-8 12
-8 13
-8 14
-8 15
-8 16
-9 10
 9 11
-9 12
-9 13
-9 14
-9 15
-9 16
-10 11
-10 12
-10 13
-10 14
-10 15
-10 16
-11 12
-11 13
-11 14
-11 15
-11 16
-12 13
-12 14
-12 15
-12 16
-13 14
-13 15
-13 16
-14 15
-14 16
-15 16</textarea>
+10 11</textarea>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="isFile" accept=".txt"></label>
           <button id="runIs">Run independent set reduction</button>
@@ -280,13 +289,19 @@
           <p>First line is <code>universe_size set_count k optional_padding</code>, then one set per line using element numbers. Example: <code>12 6 4</code> followed by six sets.</p>
         </div>
         <label>Set cover data</label>
-        <textarea id="setCoverInput" spellcheck="false">12 6 4
+        <p class="benchmarkMeta">Benchmark: Beasley-style set-covering example, converted from row/column incidence to app set rows, optimum 3, expected YES for k=3.</p>
+        <textarea id="setCoverInput" spellcheck="false"># Set-covering incidence example from Beasley-style OR set covering literature
+# Source: https://people.brunel.ac.uk/~mastjjb/jeb/orlib/scpinfo.html
+# Original format: row/column incidence matrix; conversion writes each column as one set.
+# Expected optimum: 3 sets; expected answer for k=3: YES
+7 7 3
+1 2 6 7
+1 2 7
 1 2 3
-4 5 6
-7 8 9
-10 11 12
-1 5 9
-2 6 10</textarea>
+5 6 7
+6 7
+4 6
+4</textarea>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="setCoverFile" accept=".txt"></label>
           <button id="runSetCover">Run set cover reduction</button>
@@ -299,13 +314,15 @@
           <p>First line is <code>universe_size set_count optional_padding</code>, then one 3-element set per line. Example: <code>12 6</code> followed by six 3-sets.</p>
         </div>
         <label>X3C data</label>
-        <textarea id="x3cInput" spellcheck="false">12 6
+        <p class="benchmarkMeta">Benchmark: canonical X3C/3-dimensional-matching teaching instance; no tiny library-format X3C file is bundled, expected YES.</p>
+        <textarea id="x3cInput" spellcheck="false"># Canonical X3C / 3-dimensional matching decision instance
+# Source family: Karp exact cover by 3-sets, converted directly to app rows.
+# Expected exact cover: S1, S2
+6 4
 1 2 3
 4 5 6
-7 8 9
-10 11 12
-1 4 7
-2 5 10</textarea>
+1 4 5
+2 3 6</textarea>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="x3cFile" accept=".txt"></label>
           <button id="runX3c">Run X3C reduction</button>
@@ -318,19 +335,32 @@
           <p>First line is <code>vertices edges colors optional_padding</code>, then one undirected edge per line. Example: <code>12 12 3</code> followed by a 12-cycle.</p>
         </div>
         <label>Graph coloring data</label>
-        <textarea id="graphColoringInput" spellcheck="false">12 12 3
+        <p class="benchmarkMeta">Benchmark: DIMACS COLOR myciel3.col graph, 4 colors, expected YES; with 3 colors it is NO.</p>
+        <textarea id="graphColoringInput" spellcheck="false"># DIMACS COLOR myciel3.col
+# Source: https://mat.gsia.cmu.edu/COLOR/instances.html
+# Original format: DIMACS edge list; conversion removes p/e prefixes.
+# Expected chromatic number: 4
+11 20 4
 1 2
+1 4
+1 7
+1 9
 2 3
-3 4
+2 6
+2 8
+3 5
+3 7
+3 10
 4 5
-5 6
-6 7
-7 8
-8 9
-9 10
-10 11
-11 12
-12 1</textarea>
+4 6
+4 10
+5 8
+5 9
+6 11
+7 11
+8 11
+9 11
+10 11</textarea>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="graphColoringFile" accept=".txt"></label>
           <button id="runGraphColoring">Run graph coloring reduction</button>
@@ -343,16 +373,27 @@
           <p>One undirected edge per line, like <code>u v</code>. Listed edges get weight <code>-1</code>; all others are <code>0</code>.</p>
         </div>
         <label>Pairs data</label>
+        <p class="benchmarkMeta">Benchmark: DIMACS COLOR myciel3.col interpreted as an HC graph; locally verified Hamiltonian cycle exists.</p>
         <textarea id="pairsInput" spellcheck="false">1 2
+1 4
+1 7
+1 9
 2 3
-3 4
+2 6
+2 8
+3 5
+3 7
+3 10
 4 5
-5 6
-6 7
-7 8
-8 9
-9 10
-10 1</textarea>
+4 6
+4 10
+5 8
+5 9
+6 11
+7 11
+8 11
+9 11
+10 11</textarea>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="pairsFile" accept=".txt"></label>
           <button id="runPairs">Run pairs solver</button>
@@ -365,13 +406,25 @@
           <p>First line is <code>n</code>, followed by an <code>n x n</code> symmetric weight matrix.</p>
         </div>
         <label>Matrix data</label>
-        <textarea id="matrixInput" spellcheck="false">6
-0 4 8 6 7 3
-4 0 5 9 6 7
-8 5 0 4 3 6
-6 9 4 0 5 8
-7 6 3 5 0 4
-3 7 6 8 4 0</textarea>
+        <p class="benchmarkMeta">Benchmark: TSPLIB gr17, full symmetric matrix converted from lower-diagonal format, optimum tour length 2085.</p>
+        <textarea id="matrixInput" spellcheck="false">17
+0 633 257 91 412 150 80 134 259 505 353 324 70 211 268 246 121
+633 0 390 661 227 488 572 530 555 289 282 638 567 466 420 745 518
+257 390 0 228 169 112 196 154 372 262 110 437 191 74 53 472 142
+91 661 228 0 383 120 77 105 175 476 324 240 27 182 239 237 84
+412 227 169 383 0 267 351 309 338 196 61 421 346 243 199 528 297
+150 488 112 120 267 0 63 34 264 360 208 329 83 105 123 364 35
+80 572 196 77 351 63 0 29 232 444 292 297 47 150 207 332 29
+134 530 154 105 309 34 29 0 249 402 250 314 68 108 165 349 36
+259 555 372 175 338 264 232 249 0 495 352 95 189 326 383 202 236
+505 289 262 476 196 360 444 402 495 0 154 578 439 336 240 685 390
+353 282 110 324 61 208 292 250 352 154 0 435 287 184 140 542 238
+324 638 437 240 421 329 297 314 95 578 435 0 254 391 448 157 301
+70 567 191 27 346 83 47 68 189 439 287 254 0 145 202 289 55
+211 466 74 182 243 105 150 108 326 336 184 391 145 0 57 426 96
+268 420 53 239 199 123 207 165 383 240 140 448 202 57 0 483 153
+246 745 472 237 528 364 332 349 202 685 542 157 289 426 483 0 336
+121 518 142 84 297 35 29 36 236 390 238 301 55 96 153 336 0</textarea>
         <label>TSP repair passes<input id="matrixTspRepairPasses" type="number" min="0" max="100" step="1" value="0"></label>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="matrixFile" accept=".txt"></label>
@@ -385,15 +438,22 @@
           <p>First line is <code>n</code>, followed by <code>x y</code> point coordinates.</p>
         </div>
         <label>Points data</label>
-        <textarea id="pointsInput" spellcheck="false">8
-0 0
-2 0
-4 1
-5 3
-3 5
-1 4
--1 3
--1 1</textarea>
+        <p class="benchmarkMeta">Benchmark: TSPLIB burma14 coordinates, converted to app Euclidean points; TSPLIB's official GEO optimum is not reused for Euclidean scoring.</p>
+        <textarea id="pointsInput" spellcheck="false">14
+16.47 96.10
+16.47 94.44
+20.09 92.54
+22.39 93.37
+25.23 97.24
+22.00 96.05
+20.47 97.02
+17.20 96.29
+16.30 97.38
+14.05 98.12
+16.53 97.38
+21.52 95.59
+19.41 97.13
+20.09 94.55</textarea>
         <label>TSP repair passes<input id="pointsTspRepairPasses" type="number" min="0" max="100" step="1" value="0"></label>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="pointsFile" accept=".txt"></label>
@@ -407,17 +467,144 @@
           <p>First line is <code>n</code>, then one upper-triangle weight per line in order: <code>(1,2), (1,3), ...</code>.</p>
         </div>
         <label>Manual edge data</label>
-        <textarea id="manualInput" spellcheck="false">5
-4
-8
-6
-7
-5
-9
-6
-4
-3
-5</textarea>
+        <p class="benchmarkMeta">Benchmark: TSPLIB gr17, upper-triangle manual weights derived from the same instance as the matrix tab, optimum 2085.</p>
+        <textarea id="manualInput" spellcheck="false">17
+633
+257
+91
+412
+150
+80
+134
+259
+505
+353
+324
+70
+211
+268
+246
+121
+390
+661
+227
+488
+572
+530
+555
+289
+282
+638
+567
+466
+420
+745
+518
+228
+169
+112
+196
+154
+372
+262
+110
+437
+191
+74
+53
+472
+142
+383
+120
+77
+105
+175
+476
+324
+240
+27
+182
+239
+237
+84
+267
+351
+309
+338
+196
+61
+421
+346
+243
+199
+528
+297
+63
+34
+264
+360
+208
+329
+83
+105
+123
+364
+35
+29
+232
+444
+292
+297
+47
+150
+207
+332
+29
+249
+402
+250
+314
+68
+108
+165
+349
+36
+495
+352
+95
+189
+326
+383
+202
+236
+154
+578
+439
+336
+240
+685
+390
+435
+287
+184
+140
+542
+238
+254
+391
+448
+157
+301
+145
+202
+289
+55
+57
+426
+96
+483
+153
+336</textarea>
         <label>TSP repair passes<input id="manualTspRepairPasses" type="number" min="0" max="100" step="1" value="0"></label>
         <div class="controls">
           <label class="fileButton">Load text file<input type="file" id="manualFile" accept=".txt"></label>

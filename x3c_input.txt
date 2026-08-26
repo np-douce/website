@@ -1,7 +1,8 @@
-12 6
+# Canonical X3C / 3-dimensional matching decision instance
+# Source family: Karp exact cover by 3-sets, converted directly to app rows.
+# Expected exact cover: S1, S2
+6 4
 1 2 3
 4 5 6
-7 8 9
-10 11 12
-1 4 7
-2 5 10
+1 4 5
+2 3 6

@@ -1,7 +1,12 @@
-12 6 4
+# Set-covering incidence example from Beasley-style OR set covering literature
+# Source: https://people.brunel.ac.uk/~mastjjb/jeb/orlib/scpinfo.html
+# Original format: row/column incidence matrix; conversion writes each column as one set.
+# Expected optimum: 3 sets; expected answer for k=3: YES
+7 7 3
+1 2 6 7
+1 2 7
 1 2 3
-4 5 6
-7 8 9
-10 11 12
-1 5 9
-2 6 10
+5 6 7
+6 7
+4 6
+4
