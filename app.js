@@ -2329,8 +2329,9 @@ function runTrackingSolver(edge, n, beta, sourceLabel, options = {}) {
   append(lines, `HC backtrack tries = ${Math.max(0, Math.floor(Number(options.backtrackLimit || 0)))}`);
   if (options.stopAtFirstHamiltonian) append(lines, "HC tour search mode = stop at first HC tour");
   if (result.precheckReason) append(lines, `HC necessary precheck failed = ${result.precheckReason}`);
-  if (Number.isFinite(result.totalTourCost)) append(lines, `${isTspStyle ? "best tour cost" : "HC tour cost"} = ${formatNumber(result.totalTourCost)}`);
+  if (Number.isFinite(result.totalTourCost)) append(lines, `${isTspStyle ? "best tour cost found" : "HC tour cost"} = ${formatNumber(result.totalTourCost)}`);
   if (Number.isFinite(result.partialTourCost) && !Number.isFinite(result.totalTourCost)) append(lines, `${isTspStyle ? "best partial tour cost" : "HC best partial tour cost"} = ${formatNumber(result.partialTourCost)}`);
+  if (isTspStyle) append(lines, `adaptive beta multiplier c = ${formatNumber(Number.isFinite(options.betaMultiplier) ? options.betaMultiplier : 1)}`);
   appendTrackingTourWitnesses(lines, result, options.tourKind || "hc");
   return lines.join("\n");
 }
@@ -2355,12 +2356,12 @@ function getHcAdaptiveBeta() {
   return true;
 }
 
-function getTspRepairPasses(inputId) {
-  const input = document.getElementById(inputId);
-  if (!input) return 0;
+function getTspBetaMultiplier() {
+  const input = document.getElementById("tspBetaMultiplier");
+  if (!input) return 1;
   const value = Number(input.value);
-  if (!Number.isFinite(value) || value < 0) throw new Error("TSP repair passes must be a nonnegative number.");
-  return Math.floor(value);
+  if (!Number.isFinite(value) || value < 0) throw new Error("TSP beta multiplier must be a nonnegative number.");
+  return value;
 }
 
 function getHcBacktrackTries() {
@@ -7496,7 +7497,7 @@ function compactRunOutput(text, elapsedMs) {
     /^VC\/degree-2 forced edges before SAT choices = /,
     /^VC\/degree-2 forced edges before choices = /,
     /^HC tour cost = /,
-    /^best tour cost = /,
+    /^best tour cost found = /,
     /^HC target cost = /,
     /^HC best partial tour cost = /,
     /^best partial tour cost = /,
@@ -7612,11 +7613,11 @@ document.getElementById("runPairs").addEventListener("click", () => runSafely(()
 document.getElementById("runMatrix").addEventListener("click", () => runSafely(() => {
   const { edge, n } = parseMatrix(document.getElementById("matrixInput").value);
   return runTrackingSolver(edge, n, NaN, "browser matrix input", {
-    repairPasses: getTspRepairPasses("matrixTspRepairPasses"),
+    repairPasses: 0,
     backtrackLimit: getHcBacktrackTries(),
     tourKind: "tsp",
     adaptiveBeta: true,
-    betaMultiplier: 1,
+    betaMultiplier: getTspBetaMultiplier(),
     scoreMethod: "importance"
   });
 }));
@@ -7626,22 +7627,22 @@ document.getElementById("runPoints").addEventListener("click", () => runSafely((
     scoreZeroEdges: true,
     euclideanPoints: points,
     removeEuclideanCrossings: true,
-    repairPasses: getTspRepairPasses("pointsTspRepairPasses"),
+    repairPasses: 0,
     backtrackLimit: getHcBacktrackTries(),
     tourKind: "tsp",
     adaptiveBeta: true,
-    betaMultiplier: 1,
+    betaMultiplier: getTspBetaMultiplier(),
     scoreMethod: "importance"
   });
 }));
 document.getElementById("runManual").addEventListener("click", () => runSafely(() => {
   const { edge, n } = parseManual(document.getElementById("manualInput").value);
   return runTrackingSolver(edge, n, NaN, "browser manual input", {
-    repairPasses: getTspRepairPasses("manualTspRepairPasses"),
+    repairPasses: 0,
     backtrackLimit: getHcBacktrackTries(),
     tourKind: "tsp",
     adaptiveBeta: true,
-    betaMultiplier: 1,
+    betaMultiplier: getTspBetaMultiplier(),
     scoreMethod: "importance"
   });
 }));

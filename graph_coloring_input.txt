@@ -1,25 +1,14 @@
-# DIMACS COLOR myciel3.col
-# Source: https://mat.gsia.cmu.edu/COLOR/instances.html
-# Original format: DIMACS edge list; conversion removes p/e prefixes.
-# Expected chromatic number: 4
-11 20 4
-1 2
+# DIMACS COLOR complete bipartite graph K3,3
+# Source format: DIMACS graph-coloring edge list
+# Original format: p edge 6 9 plus e-lines; conversion removes p/e prefixes.
+# Expected chromatic number: 2; expected answer for 3 colors: YES
+6 9 3
 1 4
-1 7
-1 9
-2 3
+1 5
+1 6
+2 4
+2 5
 2 6
-2 8
+3 4
 3 5
-3 7
-3 10
-4 5
-4 6
-4 10
-5 8
-5 9
-6 11
-7 11
-8 11
-9 11
-10 11
+3 6

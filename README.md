@@ -192,7 +192,7 @@ Score-guided backtracking is controlled by `HC backtrack tries`, which defaults 
 
 Before scoring, the raw HC solver runs necessary graph checks and the original degree-2 forced-edge precheck: if a vertex has exactly two listed HC edges, both are forced into the tour before the scoring loop continues.
 
-`TSP repair passes` appears only inside the matrix, points, and manual TSP tabs. It defaults to `0`. When raised, it runs local repair only after weighted TSP tours are built. Reduction tabs and raw HC keep repair disabled.
+The TSP tabs expose the adaptive beta multiplier `c`. The production default remains `c = 1`; for the bundled TSPLIB gr17 matrix/manual examples, `c = 1.5` with `HC backtrack tries = 4` is a recommended experiment setting for reaching the known optimum tour cost `2085`. TSP repair passes are not exposed because backtracking is the smart repair path.
 
 ## 3-SAT input format
 
@@ -474,7 +474,7 @@ The default examples use small benchmark or benchmark-format instances so they s
 | Independent Set | DIMACS COLOR graph source, https://mat.gsia.cmu.edu/COLOR/instances.html | myciel3.col | 11 vertices, 20 edges, k=5 | YES; k=6 is NO | DIMACS `p/e` prefixes are removed; same edge list is used directly. |
 | Set Cover | Beasley OR-Library set covering reference, https://people.brunel.ac.uk/~mastjjb/jeb/orlib/scpinfo.html | small set-covering incidence example | 7 elements, 7 sets, k=3 | Optimum 3; YES for k=3 | Row/column incidence is transposed into the app's one-set-per-line format. |
 | X3C | Karp exact-cover-by-3-sets problem family | canonical X3C teaching instance | 6 elements, 4 triples | YES, exact cover S1 and S2 | No tiny directly compatible library file is bundled; the current example is kept and labelled. |
-| Graph Coloring | DIMACS COLOR graph source, https://mat.gsia.cmu.edu/COLOR/instances.html | myciel3.col | 11 vertices, 20 edges, 4 colors | Chromatic number 4; YES for 4 colors and NO for 3 | DIMACS `p/e` prefixes are removed; same edge list is used directly. |
+| Graph Coloring | DIMACS graph-coloring edge-list format | complete bipartite graph K3,3 | 6 vertices, 9 edges, 3 colors | Chromatic number 2; YES for 3 colors | DIMACS `p/e` prefixes are removed; this graph has minimum degree 3, so it survives the exact precheck and runs through the HC witness path. |
 | Hamiltonian Pairs | DIMACS COLOR graph source, https://mat.gsia.cmu.edu/COLOR/instances.html | myciel3.col as an HC graph | 11 vertices, 20 edges | YES; one cycle is 1-2-6-4-10-3-7-11-8-5-9-1 | DIMACS edge list is loaded as raw allowed Hamiltonian edges. |
 | TSP Matrix | TSPLIB95, https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/ | gr17 | 17 cities | Optimum tour length 2085 | TSPLIB lower-diagonal matrix is expanded to the app's full symmetric matrix. |
 | TSP Points | TSPLIB95, https://comopt.ifi.uni-heidelberg.de/software/TSPLIB95/ | burma14 | 14 coordinates | Official TSPLIB GEO optimum is not used for Euclidean app scoring | Coordinates are copied into the app's Euclidean points format. |

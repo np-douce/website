@@ -1,4 +1,4 @@
-const CACHE_NAME = "np-complete-lab-v1.2-benchmark-examples";
+const CACHE_NAME = "np-complete-lab-v1.2-shared-settings";
 const ASSETS = [
   "index.html",
   "styles.css",
