@@ -19,6 +19,8 @@ function generate(text){
 function makeServer(){
  const server=new McpServer({name:'audio-test-mcp',version:'0.2.0'});
  registerAppResource(server,'audio-player',URI,{},async()=>({contents:[{uri:URI,mimeType:RESOURCE_MIME_TYPE,text:html}]}));
+ registerAppResource(server,'ui-health-check','ui://audio-test/static-check-v1.html',{},async()=>({contents:[{uri:'ui://audio-test/static-check-v1.html',mimeType:RESOURCE_MIME_TYPE,text:'<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="background:#fff;color:#111;padding:16px;font:18px system-ui"><h2>UI resource loaded</h2><p>Static HTML works. No JavaScript or audio required.</p></body></html>'}]}));
+ registerAppTool(server,'check_widget',{title:'Check MCP UI resource',description:'Render a minimal static HTML diagnostic to verify MCP resource registration and iframe rendering.',inputSchema:{},annotations:{readOnlyHint:true},_meta:{ui:{resourceUri:'ui://audio-test/static-check-v1.html'},'openai/outputTemplate':'ui://audio-test/static-check-v1.html'}},async()=>({content:[{type:'text',text:'Static UI diagnostic requested.'}]}));
  registerAppTool(server,'speak_text',{
   title:'Audio Test: Play generated audio',
   description:'Generate free WAV speech on the server and show an inline Play/Stop HTML audio player. No browser speechSynthesis or paid API.',
