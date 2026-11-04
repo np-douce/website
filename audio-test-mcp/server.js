@@ -8,7 +8,7 @@ const espeakRoot=resolve('./.espeak-root/usr');
 process.env.PATH=resolve('./.espeak-bin')+':'+espeakRoot+'/bin:'+process.env.PATH;
 process.env.LD_LIBRARY_PATH=espeakRoot+'/lib/x86_64-linux-gnu:'+espeakRoot+'/lib:'+ (process.env.LD_LIBRARY_PATH||'');
 delete process.env.ESPEAK_DATA_PATH;
-const URI = 'ui://audio-test/piper-p225-autoplay-v5.html';
+const URI = 'ui://audio-test/piper-p225-kiss-v6.html';
 let status = 'idle';
 let audioData = null;
 let errorMessage = '';
@@ -45,12 +45,16 @@ function makeServer() {
   registerAppResource(server, 'piper-p225-live-player', URI, {}, async () => {
     const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="background:white;color:#111;padding:16px;font:16px system-ui">
-<h3>Piper P225: You know, I was going to agree with you. Then I checked the mathematics.</h3>
+<h3>Piper P225 + kiss test</h3><p>Speech first, then kiss. Credit: Lemonjolly (CC BY 4.0).</p>
 <p id="status">Checking recording...</p>
 <audio id="player" controls preload="metadata" style="display:none;width:100%;min-height:54px"></audio>
 <script>
 let ready=false;
 const player=document.getElementById('player');
+const voiceUrl='https://np-douce-audio-test-mcp.onrender.com/audio-test/audio?v=p225-20261104';
+const kissUrl='https://cdn.freesound.org/previews/275/275345_3173139-hq.mp3';
+let stage='voice';
+player.addEventListener('ended',async()=>{if(stage==='voice'){stage='kiss';player.src=kissUrl;document.getElementById('status').textContent='Playing kiss sound';try{await player.play();}catch(e){document.getElementById('status').textContent='Tap Play for kiss';}}else{document.getElementById('status').textContent='Finished';stage='voice';player.src=voiceUrl;}});
 async function poll(){
   try{
     const response=await fetch('https://np-douce-audio-test-mcp.onrender.com/audio-test/status?v=p225-20261104',{cache:'no-store'});
@@ -59,7 +63,7 @@ async function poll(){
     document.getElementById('status').textContent=data.status==='ready'?'Ready to play':data.status==='error'?'Error: '+data.error:'Status: '+data.status;
     if(data.status==='ready'&&!ready){
       ready=true;
-      player.src='https://np-douce-audio-test-mcp.onrender.com/audio-test/audio?v=p225-20261104';
+      player.src=voiceUrl;
       player.style.display='block';
     }
     if(data.status==='error')return;
@@ -70,9 +74,9 @@ poll();
 </script></body></html>`;
     return { contents: [{ uri: URI, mimeType: RESOURCE_MIME_TYPE, text: html }] };
   });
-  registerAppTool(server, 'test_piper_p225_autoplay_v5', {
-    title: 'Piper: P225 feminine British voice test',
-    description: "Generate Piper P225 voice; player displays the latest P225 recording with manual playback.",
+  registerAppTool(server, 'test_piper_p225_kiss_v6', {
+    title: 'Piper P225 + kiss ending test',
+    description: "Play Piper P225 speech followed by Lemonjolly's licensed kiss recording in one player.",
     inputSchema: {},
     annotations: { readOnlyHint: true },
     _meta: { ui: { resourceUri: URI }, 'openai/outputTemplate': URI }
