@@ -51,20 +51,49 @@ const effects={
 };
 const tasks=new Map();
 let latestTask='';
+// Keep complete phrases together so Piper can interpret commas and sentence intonation.
+// Extra silence is only added BETWEEN synthesized chunks, never at every comma.
+function smartSpeechChunks(input){
+ const words=String(input).trim().split(/\s+/).filter(Boolean);
+ const result=[];let current=[];
+ function flush(){if(current.length){result.push(current.join(' '));current=[];}}
+ for(let i=0;i<words.length;i++){
+  const word=words[i];current.push(word);
+  const end=/[.!?]["')\]]*$/.test(word)&&!/\b(?:Mr|Mrs|Ms|Dr|Prof|St|vs|etc)\.$/i.test(word)&&!/\d\.\d/.test(word);
+  const soft=/[,;:]["')\]]*$/.test(word);
+  // Prefer complete sentences; only split at commas if the sentence gets long.
+  if(end||(current.length>=32&&soft)||current.length>=45)flush();
+ }
+ flush();return result;
+}
+function boundaryPause(text){
+ const end=String(text).trim();
+ if(/\.{3,}["')\]]*$/.test(end)||/…["')\]]*$/.test(end))return 450;
+ if(/\?["')\]]*$/.test(end))return 300;
+ if(/!["')\]]*$/.test(end))return 250;
+ if(/\.[ "')\]]*$/.test(end))return 250;
+ if(/[;:]["')\]]*$/.test(end))return 200;
+ if(/,["')\]]*$/.test(end))return 100;
+ return 90;
+}
 function parseScript(script){
  const pieces=String(script).split(/(\[(?:kiss|giggle|pause:\s*\d{1,4}ms)\])/gi);
- return pieces.flatMap(part=>{
-  const p=part.trim(); if(!p)return [];
-  if(/^\[kiss\]$/i.test(p))return [{type:'effect',url:effects.kiss}];
-  if(/^\[giggle\]$/i.test(p))return [{type:'effect',url:effects.giggle}];
-  const m=p.match(/^\[pause:\s*(\d{1,4})ms\]$/i);
-  if(m)return [{type:'pause',ms:Math.min(3000,Number(m[1]))}];
-  const clauses=p.match(/[^,.!?;:]+[,.!?;:]*(?:["'](?=\s|$))?|[^,.!?;:]+$/g)||[p];
-  const chunks=[];
-  for(const clause of clauses){const words=clause.trim().split(/\s+/);for(let i=0;i<words.length;i+=28){const text=words.slice(i,i+28).join(' ').trim();if(!text)continue;if(chunks.length)chunks.push({type:'pause',ms:500,status:'ready'});chunks.push({type:'speech',text,status:'queued'});}}
-  return chunks;
- });
+ const segments=[];
+ for(const part of pieces){
+  const p=part.trim();if(!p)continue;
+  if(/^\[kiss\]$/i.test(p)){segments.push({type:'effect',url:effects.kiss});continue;}
+  if(/^\[giggle\]$/i.test(p)){segments.push({type:'effect',url:effects.giggle});continue;}
+  const pause=p.match(/^\[pause:\s*(\d{1,4})ms\]$/i);
+  if(pause){segments.push({type:'pause',ms:Math.min(3000,Number(pause[1])),status:'ready'});continue;}
+  for(const chunk of smartSpeechChunks(p)){
+   const previous=segments[segments.length-1];
+   if(previous?.type==='speech')segments.push({type:'pause',ms:boundaryPause(previous.text),status:'ready'});
+   segments.push({type:'speech',text:chunk,status:'queued'});
+  }
+ }
+ return segments;
 }
+
 let modelPromise=null;
 async function getModel(){if(!modelPromise)modelPromise=(async()=>{const {PiperNativeTTS,resolveModelPathFromOptions}=await import('pipertts');const modelPath=await resolveModelPathFromOptions({model:'en_GB-vctk-medium',modelsDir:'./models'});return PiperNativeTTS.load({modelPath});})().catch(e=>{modelPromise=null;throw e;});return modelPromise;}
 async function compressWav(wav){return new Promise(done=>{const ff=spawn('ffmpeg',['-hide_banner','-loglevel','error','-i','pipe:0','-ac','1','-c:a','libopus','-b:a','24k','-f','ogg','pipe:1']);const parts=[];let failed=false;ff.on('error',()=>{failed=true;done({audio:wav,mime:'audio/wav'});});ff.stdout.on('data',x=>parts.push(x));ff.on('close',code=>{if(!failed)done(code===0&&parts.length?{audio:Buffer.concat(parts),mime:'audio/ogg'}:{audio:wav,mime:'audio/wav'});});ff.stdin.on('error',()=>{});ff.stdin.end(wav);});}
@@ -143,7 +172,7 @@ poll();
   registerAppResource(server,'piper-dynamic-player',URI7,{},async()=>{
    const html=`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="font:16px system-ui;padding:16px;background:white;color:#111">
-<h3>Piper P225: Dynamic script</h3><p id="status">Loading script...</p>
+<h3>Piper P225: Natural pacing</h3><p id="status">Loading script...</p>
 <audio id="player" controls style="width:100%;display:none"></audio>
 <button id="replay" type="button" style="display:none;margin-top:10px;padding:9px 16px;border:1px solid #888;border-radius:8px;background:#eee;color:#111;font:inherit">Replay from beginning</button>
 <p style="font-size:12px">Effects: Lemonjolly, Freesound (CC BY 4.0)</p>
