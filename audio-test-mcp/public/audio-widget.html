@@ -1,10 +1,15 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>body{font-family:system-ui;padding:16px;color:CanvasText;background:Canvas}.panel{border:1px solid #9996;border-radius:14px;padding:14px}textarea{width:100%;box-sizing:border-box;min-height:75px;font:inherit}button{padding:12px;margin:8px 6px 0 0;font:inherit}#status{font-size:13px}</style></head><body><div class="panel"><strong>Audio Test (free)</strong><p><textarea id="text">Hello. This is a test of audio playback inside ChatGPT.</textarea></p><button id="play">▶ Play</button><button id="stop">■ Stop</button><p id="status">Ready</p><small>Uses browser/device speech, not ChatGPT's internal voice.</small></div><script>
-const input=document.getElementById('text'),status=document.getElementById('status');
-document.getElementById('play').onclick=()=>{
- if(!('speechSynthesis' in window)||!('SpeechSynthesisUtterance' in window)){status.textContent='Browser speech synthesis unavailable';return;}
- try{speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(input.value);u.lang='en-US';u.onstart=()=>status.textContent='Speaking';u.onend=()=>status.textContent='Finished';u.onerror=e=>status.textContent='Audio error: '+e.error;speechSynthesis.speak(u);status.textContent='Speech requested';}catch(e){status.textContent='Blocked: '+e.message;}
-};
-document.getElementById('stop').onclick=()=>{if('speechSynthesis' in window)speechSynthesis.cancel();status.textContent='Stopped';};
-let id=1;window.addEventListener('message',e=>{if(e.source!==window.parent)return;const m=e.data;if(m?.method==='ui/notifications/tool-result'&&typeof m.params?.structuredContent?.text==='string')input.value=m.params.structuredContent.text;if(m?.id===1&&m?.result)window.parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');});
-window.parent.postMessage({jsonrpc:'2.0',id:1,method:'ui/initialize',params:{protocolVersion:'2025-06-18',clientInfo:{name:'audio-test',version:'0.1.0'},capabilities:{}}},'*');
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="font-family:system-ui;padding:12px"><h3>Audio Test v0.2</h3><p>Server-generated WAV, no browser speech synthesis.</p><audio id="player" controls style="width:100%"></audio><p id="status">Waiting for audio...</p><script>
+const player=document.getElementById('player');
+const status=document.getElementById('status');
+window.addEventListener('message',function(event){
+ const msg=event.data;
+ if(msg && msg.method==='ui/notifications/tool-result'){
+  const data=msg.params && msg.params.structuredContent;
+  if(data && typeof data.audioDataUrl==='string'){
+   player.src=data.audioDataUrl;
+   status.textContent='Audio ready. Tap Play.';
+  }
+ }
+});
+player.addEventListener('error',function(){status.textContent='Audio playback failed';});
 </script></body></html>
