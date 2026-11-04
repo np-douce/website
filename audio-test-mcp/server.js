@@ -1,8 +1,13 @@
 import { createServer } from 'node:http';
+import { resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
 
+const espeakRoot=resolve('./.espeak-root/usr');
+process.env.PATH=espeakRoot+'/bin:'+process.env.PATH;
+process.env.LD_LIBRARY_PATH=espeakRoot+'/lib/x86_64-linux-gnu:'+espeakRoot+'/lib:'+ (process.env.LD_LIBRARY_PATH||'');
+process.env.ESPEAK_DATA_PATH=espeakRoot+'/share/espeak-ng-data';
 const URI = 'ui://audio-test/piper-amy-autoplay-v3.html';
 let status = 'idle';
 let audioData = null;
@@ -47,14 +52,14 @@ function makeServer() {
 let ready=false;
 async function poll(){
   try{
-    const response=await fetch('/audio-test/status',{cache:'no-store'});
+    const response=await fetch('https://np-douce-audio-test-mcp.onrender.com/audio-test/status',{cache:'no-store'});
     if(!response.ok)throw Error('Server unavailable');
     const data=await response.json();
     document.getElementById('status').textContent=data.status==='ready'?'Ready to play':data.status==='error'?'Error: '+data.error:'Status: '+data.status;
     if(data.status==='ready'&&!ready){
       ready=true;
       const player=document.getElementById('player');
-      player.src='/audio-test/audio';
+      player.src='https://np-douce-audio-test-mcp.onrender.com/audio-test/audio';
       player.style.display='block';
     }
     if(data.status==='error')return;
