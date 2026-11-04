@@ -5,9 +5,9 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
 
 const espeakRoot=resolve('./.espeak-root/usr');
-process.env.PATH=espeakRoot+'/bin:'+process.env.PATH;
+process.env.PATH=resolve('./.espeak-bin')+':'+espeakRoot+'/bin:'+process.env.PATH;
 process.env.LD_LIBRARY_PATH=espeakRoot+'/lib/x86_64-linux-gnu:'+espeakRoot+'/lib:'+ (process.env.LD_LIBRARY_PATH||'');
-process.env.ESPEAK_DATA_PATH=espeakRoot+'/share/espeak-ng-data';
+process.env.ESPEAK_DATA_PATH=espeakRoot+'/share';
 const URI = 'ui://audio-test/piper-amy-autoplay-v3.html';
 let status = 'idle';
 let audioData = null;
