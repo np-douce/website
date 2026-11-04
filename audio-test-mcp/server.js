@@ -178,11 +178,30 @@ poll();
 
   registerAppResource(server,'piper-dynamic-player',URI7,{},async()=>{
    const html=`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="font:16px system-ui;padding:16px;background:white;color:#111">
-<h3>Piper WARMF: Natural pacing</h3><p id="status">Loading script...</p>
-<audio id="player" controls style="width:100%;display:none"></audio>
-<button id="replay" type="button" style="display:none;margin-top:10px;padding:9px 16px;border:1px solid #888;border-radius:8px;background:#eee;color:#111;font:inherit">Replay from beginning</button>
-<p style="font-size:12px">Effects: Lemonjolly (CC BY 4.0); DarkNightPrincess (CC0), Freesound.</p>
+<body>
+<style>
+:root{color-scheme:dark;font:13px system-ui,sans-serif}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0;background:transparent}
+.voice-card{width:100%;max-width:380px;padding:12px 14px;border:1px solid #39333f;border-radius:16px;background:#19171e;color:#eee8f4}
+.voice-header{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.voice-title{font-size:13px;font-weight:600;letter-spacing:.03em}
+.voice-dot{display:inline-block;width:6px;height:6px;margin-right:7px;border-radius:50%;background:#b59aca}
+#status{margin:6px 0 8px;font-size:11px;color:#bdb3c8;overflow-wrap:anywhere}
+#player{width:100%;height:34px;display:none}
+#replay{display:none;padding:5px 9px;border:1px solid #51425d;border-radius:20px;background:#2b2334;color:#e6d8f1;font:inherit;font-size:11px;cursor:pointer}
+#replay:hover{background:#3a2c46}
+#replay:focus-visible{outline:2px solid #c8a9e1;outline-offset:3px}
+.credits{margin:8px 0 0;font-size:10px;color:#aa9fb5}
+.credits summary{cursor:pointer;width:fit-content}
+.credits p{margin:5px 0 0}
+</style>
+<section class="voice-card" aria-label="Desiree voice player">
+<div class="voice-header"><span class="voice-title"><span class="voice-dot" aria-hidden="true"></span>Desi · Voice</span><button id="replay" type="button" aria-label="Replay from beginning">↻ Replay</button></div>
+<p id="status" role="status" aria-live="polite">Loading voice…</p>
+<audio id="player" controls aria-label="Voice playback"></audio>
+<details class="credits"><summary>Sound credits</summary><p>Effects: Lemonjolly (CC BY 4.0); DarkNightPrincess (CC0), Freesound.</p></details>
+</section>
 <script>
 const base='${BASE}',audio=document.getElementById('player'),statusEl=document.getElementById('status');
 let task=null,index=0,pauseTimer=null,lockedId=null;
