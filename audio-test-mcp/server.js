@@ -172,7 +172,7 @@ async function poll(){
  try{
   const r=await fetch(base+'/audio-test/v7/status',{cache:'no-store'});
   const d=await r.json();
-  if(d.status==='ready'){task=d;statusEl.textContent='Ready to play';setFirstSegment();audio.style.display='block';replay.style.display='inline-block';return;}
+  if(d.status==='ready'){task=d;statusEl.textContent='Ready to play';setFirstSegment();audio.style.display='block';replay.style.display='inline-block';statusEl.textContent='Attempting automatic playback';try{await audio.play();statusEl.textContent='Playing';}catch(e){statusEl.textContent='Autoplay blocked by browser. Tap Play to begin.';}return;}
   statusEl.textContent=d.status==='error'?'Error: '+d.error:'Status: '+d.status;
  }catch(e){statusEl.textContent='Waiting for server';}
  setTimeout(poll,1600);
