@@ -7,7 +7,7 @@ import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from '@model
 import { z } from 'zod';
 const require=createRequire(import.meta.url);
 const meSpeak=require('mespeak');
-meSpeak.loadConfig();
+meSpeak.loadConfig(require('mespeak/src/mespeak_config.json'));
 meSpeak.loadVoice(require('mespeak/voices/en/en-us.json'));
 const html=readFileSync(new URL('./public/audio-widget.html',import.meta.url),'utf8');
 const URI='ui://audio-test/player.html';
