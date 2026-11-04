@@ -24,7 +24,7 @@ async function generateHi() {
     const loaded = performance.now();
     console.log('Piper model load seconds:', ((loaded-started)/1000).toFixed(2));
     status = 'generating';
-    const { audio } = await tts.synthesize('Hi, how are you?');
+    const { audio } = await tts.synthesize('Hello again. This is Amy, and the new voice test is working.');
     audioData = 'data:audio/wav;base64,' + Buffer.from(audio).toString('base64');
     status = 'ready';
     console.log('Piper speech generation seconds:', ((performance.now()-loaded)/1000).toFixed(2));
@@ -45,7 +45,7 @@ function makeServer() {
   registerAppResource(server, 'piper-amy-live-player', URI, {}, async () => {
     const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="background:white;color:#111;padding:16px;font:16px system-ui">
-<h3>Piper Amy: Hi, how are you?</h3>
+<h3>Piper Amy: Hello again. This is Amy, and the new voice test is working.</h3>
 <p id="status">Checking recording...</p>
 <audio id="player" controls preload="metadata" style="display:none;width:100%;min-height:54px"></audio>
 <script>
