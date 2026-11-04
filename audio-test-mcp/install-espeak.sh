@@ -17,3 +17,15 @@ for deb in ./*.deb; do
 done
 test -x "$ROOT/usr/bin/espeak-ng"
 echo "Local espeak-ng extracted successfully"
+
+# Force espeak-ng to use the extracted data, not its compiled system default.
+mkdir -p "$PWD/../.espeak-bin"
+cat > "$PWD/../.espeak-bin/espeak-ng" <<'WRAPPER'
+#!/usr/bin/env bash
+BASE="$(cd "$(dirname "$0")/.." && pwd)"
+export ESPEAK_DATA_PATH="$BASE/.espeak-root/usr/share"
+exec "$BASE/.espeak-root/usr/bin/espeak-ng" --path="$BASE/.espeak-root/usr/share" "$@"
+WRAPPER
+chmod +x "$PWD/../.espeak-bin/espeak-ng"
+"$PWD/../.espeak-bin/espeak-ng" --version
+test -f "$ROOT/usr/share/espeak-ng-data/phontab"
