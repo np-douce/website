@@ -137,15 +137,32 @@ poll();
 <body style="font:16px system-ui;padding:16px;background:white;color:#111">
 <h3>Piper P225: Dynamic script</h3><p id="status">Loading script...</p>
 <audio id="player" controls style="width:100%;display:none"></audio>
+<button id="replay" type="button" style="display:none;margin-top:10px;padding:9px 16px;border:1px solid #888;border-radius:8px;background:#eee;color:#111;font:inherit">Replay from beginning</button>
 <p style="font-size:12px">Effects: Lemonjolly, Freesound (CC BY 4.0)</p>
 <script>
 const base='${BASE}',audio=document.getElementById('player'),statusEl=document.getElementById('status');
-let task=null,index=0;
+let task=null,index=0,pauseTimer=null;
+const replay=document.getElementById('replay');
+function setFirstSegment(){
+ if(!task)return;
+ index=0;
+ const first=task.segments[0];
+ if(first?.type==='pause'){audio.removeAttribute('src');audio.load();return;}
+ audio.src=first.type==='effect'?first.url:base+'/audio-test/v7/audio/'+task.id+'/0';
+ index=1;
+}
+replay.addEventListener('click',async()=>{
+ if(!task)return;
+ if(pauseTimer!==null){clearTimeout(pauseTimer);pauseTimer=null;}
+ audio.pause();setFirstSegment();statusEl.textContent='Replaying from beginning';
+ if(task.segments[0]?.type==='pause'){await next();return;}
+ try{await audio.play();}catch(e){statusEl.textContent='Tap Play to replay';}
+});
 async function next(){
  if(!task)return;
  if(index>=task.segments.length){statusEl.textContent='Finished';return;}
  const segment=task.segments[index++];
- if(segment.type==='pause'){statusEl.textContent='Pause';setTimeout(next,segment.ms);return;}
+ if(segment.type==='pause'){statusEl.textContent='Pause';pauseTimer=setTimeout(()=>{pauseTimer=null;next();},segment.ms);return;}
  audio.src=segment.type==='effect'?segment.url:base+'/audio-test/v7/audio/'+task.id+'/'+(index-1);
  audio.style.display='block';statusEl.textContent=segment.type==='speech'?'Speaking':'Playing expression';
  try{await audio.play();}catch(e){statusEl.textContent='Tap Play to continue';}
@@ -155,7 +172,7 @@ async function poll(){
  try{
   const r=await fetch(base+'/audio-test/v7/status',{cache:'no-store'});
   const d=await r.json();
-  if(d.status==='ready'){task=d;statusEl.textContent='Ready to play';audio.src=d.segments[0].type==='effect'?d.segments[0].url:base+'/audio-test/v7/audio/'+d.id+'/0';audio.style.display='block';index=1;audio.addEventListener('ended',next,{once:false});return;}
+  if(d.status==='ready'){task=d;statusEl.textContent='Ready to play';setFirstSegment();audio.style.display='block';replay.style.display='inline-block';return;}
   statusEl.textContent=d.status==='error'?'Error: '+d.error:'Status: '+d.status;
  }catch(e){statusEl.textContent='Waiting for server';}
  setTimeout(poll,1600);
