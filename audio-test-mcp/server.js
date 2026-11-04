@@ -10,7 +10,7 @@ const meSpeak=require('mespeak');
 meSpeak.loadConfig(require('mespeak/src/mespeak_config.json'));
 meSpeak.loadVoice(require('mespeak/voices/en/en-us.json'));
 const html=readFileSync(new URL('./dist/audio-widget.html',import.meta.url),'utf8');
-const URI='ui://audio-test/player.html';
+const URI='ui://audio-test/diagnostic-v05.html';
 function generate(text){
  const wav=meSpeak.speak(text,{rawdata:'buffer',speed:165,pitch:55});
  if(!wav||!wav.length)throw new Error('No WAV generated');
