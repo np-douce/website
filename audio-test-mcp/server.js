@@ -9,7 +9,7 @@ const require=createRequire(import.meta.url);
 const meSpeak=require('mespeak');
 meSpeak.loadConfig(require('mespeak/src/mespeak_config.json'));
 meSpeak.loadVoice(require('mespeak/voices/en/en-us.json'));
-const html=readFileSync(new URL('./public/audio-widget.html',import.meta.url),'utf8');
+const html=readFileSync(new URL('./dist/audio-widget.html',import.meta.url),'utf8');
 const URI='ui://audio-test/player.html';
 function generate(text){
  const wav=meSpeak.speak(text,{rawdata:'buffer',speed:165,pitch:55});
