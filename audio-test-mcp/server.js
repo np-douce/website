@@ -20,18 +20,17 @@ async function generateHi() {
   const started = performance.now();
   status = 'loading'; errorMessage = '';
   try {
-    const { PiperNativeTTS, resolveModelPathFromOptions } = await import('pipertts');
-    const modelPath = await resolveModelPathFromOptions({ model: 'en_GB-vctk-medium', modelsDir: './models' });
-    const tts = await PiperNativeTTS.load({ modelPath });
+    const { PiperNativeTTS } = await import('pipertts');
+    const tts = await PiperNativeTTS.load({ model: 'hub:warmf-english-en-medium', modelsDir: './models' });
     const loaded = performance.now();
     console.log('Piper model load seconds:', ((loaded-started)/1000).toFixed(2));
     status = 'generating';
-    const { audio } = await tts.synthesize('You know, I was going to agree with you. Then I checked the mathematics.', { speakerId: 107 });
+    const { audio } = await tts.synthesize('You know, I was going to agree with you. Then I checked the mathematics.', { speakerId: 0 });
     audioData = 'data:audio/wav;base64,' + Buffer.from(audio).toString('base64');
     status = 'ready';
     console.log('Piper speech generation seconds:', ((performance.now()-loaded)/1000).toFixed(2));
     console.log('Piper total seconds:', ((performance.now()-started)/1000).toFixed(2));
-    console.log('Piper greeting ready');
+    console.log('Piper WARMF greeting ready');
   } catch (error) {
     errorMessage = error?.message || String(error);
     status = 'error';
@@ -95,7 +94,7 @@ function parseScript(script){
 }
 
 let modelPromise=null;
-async function getModel(){if(!modelPromise)modelPromise=(async()=>{const {PiperNativeTTS,resolveModelPathFromOptions}=await import('pipertts');const modelPath=await resolveModelPathFromOptions({model:'en_GB-vctk-medium',modelsDir:'./models'});return PiperNativeTTS.load({modelPath});})().catch(e=>{modelPromise=null;throw e;});return modelPromise;}
+async function getModel(){if(!modelPromise)modelPromise=(async()=>{const {PiperNativeTTS}=await import('pipertts');return PiperNativeTTS.load({model:'hub:warmf-english-en-medium',modelsDir:'./models'});})().catch(e=>{modelPromise=null;throw e;});return modelPromise;}
 async function compressWav(wav){return new Promise(done=>{const ff=spawn('ffmpeg',['-hide_banner','-loglevel','error','-i','pipe:0','-ac','1','-c:a','libopus','-b:a','24k','-f','ogg','pipe:1']);const parts=[];let failed=false;ff.on('error',()=>{failed=true;done({audio:wav,mime:'audio/wav'});});ff.stdout.on('data',x=>parts.push(x));ff.on('close',code=>{if(!failed)done(code===0&&parts.length?{audio:Buffer.concat(parts),mime:'audio/ogg'}:{audio:wav,mime:'audio/wav'});});ff.stdin.on('error',()=>{});ff.stdin.end(wav);});}
 let queue=Promise.resolve();
 async function renderTask(task){
@@ -107,7 +106,7 @@ async function renderTask(task){
    const segment=task.segments[i];
    if(segment.type==='speech'){
     segment.status='generating';
-    const {audio}=await tts.synthesize(segment.text,{speakerId:107});
+    const {audio}=await tts.synthesize(segment.text,{speakerId:0});
     const compressed=await compressWav(Buffer.from(audio));
     segment.audio=compressed.audio;segment.mime=compressed.mime;segment.status='ready';
    }
@@ -126,10 +125,10 @@ function startTask(script){
 
 function makeServer() {
   const server = new McpServer({ name: 'piper-audio-test', version: '1.0.0' });
-  registerAppResource(server, 'piper-p225-live-player', URI, {}, async () => {
+  registerAppResource(server, 'piper-warmf-legacy-player', URI, {}, async () => {
     const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="background:white;color:#111;padding:16px;font:16px system-ui">
-<h3>Piper P225 + kiss test</h3><p>Speech first, then kiss. Credit: Lemonjolly (CC BY 4.0).</p>
+<h3>Piper WARMF + kiss test</h3><p>Speech first, then kiss. Credit: Lemonjolly (CC BY 4.0).</p>
 <p id="status">Checking recording...</p>
 <audio id="player" controls preload="metadata" style="display:none;width:100%;min-height:54px"></audio>
 <script>
@@ -159,8 +158,8 @@ poll();
     return { contents: [{ uri: URI, mimeType: RESOURCE_MIME_TYPE, text: html }] };
   });
   registerAppTool(server, 'test_piper_p225_kiss_v6', {
-    title: 'Piper P225 + kiss ending test',
-    description: "Play Piper P225 speech followed by Lemonjolly's licensed kiss recording in one player.",
+    title: 'Piper WARMF + kiss ending test',
+    description: "Play Piper WARMF speech followed by Lemonjolly's licensed kiss recording in one player.",
     inputSchema: {},
     annotations: { readOnlyHint: true },
     _meta: { ui: { resourceUri: URI }, 'openai/outputTemplate': URI }
@@ -172,7 +171,7 @@ poll();
   registerAppResource(server,'piper-dynamic-player',URI7,{},async()=>{
    const html=`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="font:16px system-ui;padding:16px;background:white;color:#111">
-<h3>Piper P225: Natural pacing</h3><p id="status">Loading script...</p>
+<h3>Piper WARMF: Natural pacing</h3><p id="status">Loading script...</p>
 <audio id="player" controls style="width:100%;display:none"></audio>
 <button id="replay" type="button" style="display:none;margin-top:10px;padding:9px 16px;border:1px solid #888;border-radius:8px;background:#eee;color:#111;font:inherit">Replay from beginning</button>
 <p style="font-size:12px">Effects: Lemonjolly, Freesound (CC BY 4.0)</p>
@@ -222,7 +221,7 @@ poll();
    return {contents:[{uri:URI7,mimeType:RESOURCE_MIME_TYPE,text:html}]};
   });
   registerAppTool(server,'compose_piper_audio_v7',{
-   title:'Piper P225 dynamic speech and expressions',
+   title:'Piper WARMF dynamic speech and expressions',
    description:'Speak arbitrary text and insert [kiss], [giggle], or [pause:500ms] markers. No deployment needed for new scripts.',
    inputSchema:{script:z.string().min(1).max(1200)},
    _meta:{ui:{resourceUri:URI7},'openai/outputTemplate':URI7}
