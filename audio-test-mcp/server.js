@@ -51,7 +51,7 @@ function makeServer(){
   let body;
   try{
    const tts=await getKokoro();
-   const audio=await tts.generate('Hello. This is Kokoro. A new voice, made without a paid speech service.',{voice:'af_heart',speed:1});
+   const audio=await tts.generate('Hi.',{voice:'af_heart',speed:1});
    const wav=await audio.toWav();
    const bytes=Buffer.isBuffer(wav)?wav:Buffer.from(wav);
    body='<h3>Kokoro 82M - Heart Voice</h3><audio controls preload="metadata" style="display:block;width:100%;min-height:54px" src="data:audio/wav;base64,'+bytes.toString('base64')+'"></audio><p>Free neural voice generated on Render. Tap Play.</p>';
