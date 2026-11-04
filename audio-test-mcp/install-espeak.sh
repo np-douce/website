@@ -23,10 +23,10 @@ mkdir -p "$PWD/../.espeak-bin"
 cat > "$PWD/../.espeak-bin/espeak-ng" <<'WRAPPER'
 #!/usr/bin/env bash
 BASE="$(cd "$(dirname "$0")/.." && pwd)"
-export ESPEAK_DATA_PATH="$BASE/.espeak-root/usr/share/espeak-ng-data"
+unset ESPEAK_DATA_PATH
 export LD_LIBRARY_PATH="$BASE/.espeak-root/usr/lib/x86_64-linux-gnu:$BASE/.espeak-root/usr/lib:${LD_LIBRARY_PATH:-}"
-exec "$BASE/.espeak-root/usr/bin/espeak-ng" --path="$BASE/.espeak-root/usr/share/espeak-ng-data" "$@"
+exec "$BASE/.espeak-root/usr/bin/espeak-ng" --path="$BASE/.espeak-root/usr/share" "$@"
 WRAPPER
 chmod +x "$PWD/../.espeak-bin/espeak-ng"
-"$PWD/../.espeak-bin/espeak-ng" --version
+"$PWD/../.espeak-bin/espeak-ng" --path="$ROOT/usr/share" --voices >/dev/null
 test -f "$ROOT/usr/share/espeak-ng-data/phontab"
