@@ -1,6 +1,7 @@
 import { createServer } from 'node:http';
 import { z } from 'zod';
 import { resolve } from 'node:path';
+import { spawn } from 'node:child_process';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
@@ -58,21 +59,25 @@ function parseScript(script){
   if(/^\[giggle\]$/i.test(p))return [{type:'effect',url:effects.giggle}];
   const m=p.match(/^\[pause:\s*(\d{1,4})ms\]$/i);
   if(m)return [{type:'pause',ms:Math.min(3000,Number(m[1]))}];
-  return [{type:'speech',text:p}];
+  return (p.match(/[^.!?]+[.!?]+|[^.!?]+$/g)||[p]).flatMap(sentence=>{const words=sentence.trim().split(/\s+/);const out=[];for(let i=0;i<words.length;i+=28)out.push({type:'speech',text:words.slice(i,i+28).join(' '),status:'queued'});return out;});
  });
 }
+let modelPromise=null;
+async function getModel(){if(!modelPromise)modelPromise=(async()=>{const {PiperNativeTTS,resolveModelPathFromOptions}=await import('pipertts');const modelPath=await resolveModelPathFromOptions({model:'en_GB-vctk-medium',modelsDir:'./models'});return PiperNativeTTS.load({modelPath});})().catch(e=>{modelPromise=null;throw e;});return modelPromise;}
+async function compressWav(wav){return new Promise(done=>{const ff=spawn('ffmpeg',['-hide_banner','-loglevel','error','-i','pipe:0','-ac','1','-c:a','libopus','-b:a','24k','-f','ogg','pipe:1']);const parts=[];let failed=false;ff.on('error',()=>{failed=true;done({audio:wav,mime:'audio/wav'});});ff.stdout.on('data',x=>parts.push(x));ff.on('close',code=>{if(!failed)done(code===0&&parts.length?{audio:Buffer.concat(parts),mime:'audio/ogg'}:{audio:wav,mime:'audio/wav'});});ff.stdin.on('error',()=>{});ff.stdin.end(wav);});}
+let queue=Promise.resolve();
 async function renderTask(task){
  try{
   task.status='loading';
-  const {PiperNativeTTS,resolveModelPathFromOptions}=await import('pipertts');
-  const modelPath=await resolveModelPathFromOptions({model:'en_GB-vctk-medium',modelsDir:'./models'});
-  const tts=await PiperNativeTTS.load({modelPath});
+  const tts=await getModel();
   task.status='generating';
   for(let i=0;i<task.segments.length;i++){
    const segment=task.segments[i];
    if(segment.type==='speech'){
+    segment.status='generating';
     const {audio}=await tts.synthesize(segment.text,{speakerId:107});
-    segment.audio=Buffer.from(audio);
+    const compressed=await compressWav(Buffer.from(audio));
+    segment.audio=compressed.audio;segment.mime=compressed.mime;segment.status='ready';
    }
   }
   task.status='ready';
@@ -83,7 +88,7 @@ function startTask(script){
  const task={id,status:'queued',segments:parseScript(script),error:''};
  tasks.set(id,task);latestTask=id;
  while(tasks.size>8)tasks.delete(tasks.keys().next().value);
- renderTask(task);
+ queue=queue.catch(()=>{}).then(()=>renderTask(task));
  return task;
 }
 
@@ -141,7 +146,7 @@ poll();
 <p style="font-size:12px">Effects: Lemonjolly, Freesound (CC BY 4.0)</p>
 <script>
 const base='${BASE}',audio=document.getElementById('player'),statusEl=document.getElementById('status');
-let task=null,index=0,pauseTimer=null;
+let task=null,index=0,pauseTimer=null,lockedId=null;
 const replay=document.getElementById('replay');
 function setFirstSegment(){
  if(!task)return;
@@ -161,6 +166,7 @@ replay.addEventListener('click',async()=>{
 async function next(){
  if(!task)return;
  if(index>=task.segments.length){statusEl.textContent='Finished';return;}
+ if(task.segments[index].type==='speech'&&task.segments[index].status!=='ready'){statusEl.textContent='Waiting for next speech chunk';try{const r=await fetch(base+'/audio-test/v7/status?id='+lockedId,{cache:'no-store'});const d=await r.json();if(d.status==='missing'){statusEl.textContent='Render restarted; request a new recording';return;}if(d.status==='error'){statusEl.textContent='Error: '+d.error;return;}task=d;}catch(e){statusEl.textContent='Waiting for Render';}setTimeout(next,1500);return;}
  const segment=task.segments[index++];
  if(segment.type==='pause'){statusEl.textContent='Pause';pauseTimer=setTimeout(()=>{pauseTimer=null;next();},segment.ms);return;}
  audio.src=segment.type==='effect'?segment.url:base+'/audio-test/v7/audio/'+task.id+'/'+(index-1);
@@ -170,9 +176,11 @@ async function next(){
 audio.addEventListener('ended',next);
 async function poll(){
  try{
-  const r=await fetch(base+'/audio-test/v7/status',{cache:'no-store'});
+  const r=await fetch(base+'/audio-test/v7/status'+(lockedId?'?id='+lockedId:''),{cache:'no-store'});
   const d=await r.json();
-  if(d.status==='ready'){task=d;statusEl.textContent='Ready to play';setFirstSegment();audio.style.display='block';replay.style.display='inline-block';statusEl.textContent='Attempting automatic playback';try{await audio.play();statusEl.textContent='Playing';}catch(e){statusEl.textContent='Autoplay blocked by browser. Tap Play to begin.';}return;}
+  if(d.id&&!lockedId)lockedId=d.id;
+  if(d.status==='missing'){statusEl.textContent='Render restarted; request a new recording';return;}
+  if(d.segments?.[0]?.status==='ready'||(d.segments?.[0]?.type!=='speech'&&d.segments?.length)){task=d;statusEl.textContent='Ready to play';setFirstSegment();audio.style.display='block';replay.style.display='inline-block';statusEl.textContent='Attempting automatic playback';try{await audio.play();statusEl.textContent='Playing';}catch(e){statusEl.textContent='Autoplay blocked by browser. Tap Play to begin.';}return;}
   statusEl.textContent=d.status==='error'?'Error: '+d.error:'Status: '+d.status;
  }catch(e){statusEl.textContent='Waiting for server';}
  setTimeout(poll,1600);
@@ -197,15 +205,15 @@ createServer(async (req, res) => {
   const url = new URL(req.url || '/', 'http://localhost');
 
   if(url.pathname==='/audio-test/v7/status'&&req.method==='GET'){
-   const task=tasks.get(latestTask);
+   const task=tasks.get(url.searchParams.get('id')||latestTask);
    res.writeHead(200,{'content-type':'application/json','cache-control':'no-store','access-control-allow-origin':'*'});
-   res.end(JSON.stringify(task?{id:task.id,status:task.status,error:task.error,segments:task.segments.map(({type,text,url,ms})=>({type,text,url,ms}))}:{status:'idle'}));return;
+   res.end(JSON.stringify(task?{id:task.id,status:task.status,error:task.error,segments:task.segments.map(({type,text,url,ms,status,mime})=>({type,text,url,ms,status,mime}))}:{status:url.searchParams.get('id')?'missing':'idle'}));return;
   }
   if(url.pathname.startsWith('/audio-test/v7/audio/')&&req.method==='GET'){
    const [, , , ,id,number]=url.pathname.split('/');
    const task=tasks.get(id),segment=task?.segments[Number(number)];
    if(!segment?.audio){res.writeHead(404).end('Not ready');return;}
-   res.writeHead(200,{'content-type':'audio/wav','content-length':segment.audio.length,'access-control-allow-origin':'*','cache-control':'no-store'});
+   res.writeHead(200,{'content-type':segment.mime||'audio/wav','content-length':segment.audio.length,'access-control-allow-origin':'*','cache-control':'no-store'});
    res.end(segment.audio);return;
   }
   if (url.pathname === '/audio-test/status' && req.method === 'GET') {
