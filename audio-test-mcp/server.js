@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { z } from 'zod';
 import { resolve } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
@@ -40,6 +41,52 @@ function startGeneration() {
   if (status === 'ready' || job) return;
   job = generateHi();
 }
+
+const URI7='ui://audio-test/piper-dynamic-v7.html';
+const BASE='https://np-douce-audio-test-mcp.onrender.com';
+const effects={
+ kiss:'https://cdn.freesound.org/previews/275/275345_3173139-hq.mp3',
+ giggle:'https://cdn.freesound.org/previews/275/275343_3173139-hq.mp3'
+};
+const tasks=new Map();
+let latestTask='';
+function parseScript(script){
+ const pieces=String(script).split(/(\\[(?:kiss|giggle|pause:\\s*\\d{1,4}ms)\\])/gi);
+ return pieces.flatMap(part=>{
+  const p=part.trim(); if(!p)return [];
+  if(/^\\[kiss\\]$/i.test(p))return [{type:'effect',url:effects.kiss}];
+  if(/^\\[giggle\\]$/i.test(p))return [{type:'effect',url:effects.giggle}];
+  const m=p.match(/^\\[pause:\\s*(\\d{1,4})ms\\]$/i);
+  if(m)return [{type:'pause',ms:Math.min(3000,Number(m[1]))}];
+  return [{type:'speech',text:p}];
+ });
+}
+async function renderTask(task){
+ try{
+  task.status='loading';
+  const {PiperNativeTTS,resolveModelPathFromOptions}=await import('pipertts');
+  const modelPath=await resolveModelPathFromOptions({model:'en_GB-vctk-medium',modelsDir:'./models'});
+  const tts=await PiperNativeTTS.load({modelPath});
+  task.status='generating';
+  for(let i=0;i<task.segments.length;i++){
+   const segment=task.segments[i];
+   if(segment.type==='speech'){
+    const {audio}=await tts.synthesize(segment.text,{speakerId:107});
+    segment.audio=Buffer.from(audio);
+   }
+  }
+  task.status='ready';
+ }catch(e){task.status='error';task.error=String(e?.message||e);}
+}
+function startTask(script){
+ const id=crypto.randomUUID();
+ const task={id,status:'queued',segments:parseScript(script),error:''};
+ tasks.set(id,task);latestTask=id;
+ while(tasks.size>8)tasks.delete(tasks.keys().next().value);
+ renderTask(task);
+ return task;
+}
+
 function makeServer() {
   const server = new McpServer({ name: 'piper-audio-test', version: '1.0.0' });
   registerAppResource(server, 'piper-p225-live-player', URI, {}, async () => {
@@ -84,11 +131,66 @@ poll();
     startGeneration();
     return { content: [{ type: 'text', text: status === 'ready' ? 'Piper greeting is ready. Tap Play when ready.' : 'Piper status: ' + status + (status === 'error' ? '. ' + errorMessage : '. Run again after generation completes.') }] };
   });
+
+  registerAppResource(server,'piper-dynamic-player',URI7,{},async()=>{
+   const html=`<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="font:16px system-ui;padding:16px;background:white;color:#111">
+<h3>Piper P225: Dynamic script</h3><p id="status">Loading script...</p>
+<audio id="player" controls style="width:100%;display:none"></audio>
+<p style="font-size:12px">Effects: Lemonjolly, Freesound (CC BY 4.0)</p>
+<script>
+const base='${BASE}',audio=document.getElementById('player'),statusEl=document.getElementById('status');
+let task=null,index=0;
+async function next(){
+ if(!task)return;
+ if(index>=task.segments.length){statusEl.textContent='Finished';return;}
+ const segment=task.segments[index++];
+ if(segment.type==='pause'){statusEl.textContent='Pause';setTimeout(next,segment.ms);return;}
+ audio.src=segment.type==='effect'?segment.url:base+'/audio-test/v7/audio/'+task.id+'/'+(index-1);
+ audio.style.display='block';statusEl.textContent=segment.type==='speech'?'Speaking':'Playing expression';
+ try{await audio.play();}catch(e){statusEl.textContent='Tap Play to continue';}
+}
+audio.addEventListener('ended',next);
+async function poll(){
+ try{
+  const r=await fetch(base+'/audio-test/v7/status',{cache:'no-store'});
+  const d=await r.json();
+  if(d.status==='ready'){task=d;statusEl.textContent='Ready to play';audio.src=d.segments[0].type==='effect'?d.segments[0].url:base+'/audio-test/v7/audio/'+d.id+'/0';audio.style.display='block';index=1;audio.addEventListener('ended',next,{once:false});return;}
+  statusEl.textContent=d.status==='error'?'Error: '+d.error:'Status: '+d.status;
+ }catch(e){statusEl.textContent='Waiting for server';}
+ setTimeout(poll,1600);
+}
+poll();
+</script></body></html>`;
+   return {contents:[{uri:URI7,mimeType:RESOURCE_MIME_TYPE,text:html}]};
+  });
+  registerAppTool(server,'compose_piper_audio_v7',{
+   title:'Piper P225 dynamic speech and expressions',
+   description:'Speak arbitrary text and insert [kiss], [giggle], or [pause:500ms] markers. No deployment needed for new scripts.',
+   inputSchema:{script:z.string().min(1).max(1200)},
+   _meta:{ui:{resourceUri:URI7},'openai/outputTemplate':URI7}
+  },async({script})=>{
+   const task=startTask(script);
+   return {content:[{type:'text',text:'Queued audio script '+task.id+'. The embedded player will load it.'}]};
+  });
   return server;
 }
 const port = Number(process.env.PORT || 8787);
 createServer(async (req, res) => {
   const url = new URL(req.url || '/', 'http://localhost');
+
+  if(url.pathname==='/audio-test/v7/status'&&req.method==='GET'){
+   const task=tasks.get(latestTask);
+   res.writeHead(200,{'content-type':'application/json','cache-control':'no-store','access-control-allow-origin':'*'});
+   res.end(JSON.stringify(task?{id:task.id,status:task.status,error:task.error,segments:task.segments.map(({type,text,url,ms})=>({type,text,url,ms}))}:{status:'idle'}));return;
+  }
+  if(url.pathname.startsWith('/audio-test/v7/audio/')&&req.method==='GET'){
+   const [, , , ,id,number]=url.pathname.split('/');
+   const task=tasks.get(id),segment=task?.segments[Number(number)];
+   if(!segment?.audio){res.writeHead(404).end('Not ready');return;}
+   res.writeHead(200,{'content-type':'audio/wav','content-length':segment.audio.length,'access-control-allow-origin':'*','cache-control':'no-store'});
+   res.end(segment.audio);return;
+  }
   if (url.pathname === '/audio-test/status' && req.method === 'GET') {
     res.writeHead(200, {'content-type':'application/json','cache-control':'no-store','access-control-allow-origin':'*'});
     res.end(JSON.stringify({status,error:errorMessage}));return;
