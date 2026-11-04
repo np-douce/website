@@ -59,7 +59,10 @@ function parseScript(script){
   if(/^\[giggle\]$/i.test(p))return [{type:'effect',url:effects.giggle}];
   const m=p.match(/^\[pause:\s*(\d{1,4})ms\]$/i);
   if(m)return [{type:'pause',ms:Math.min(3000,Number(m[1]))}];
-  return (p.match(/[^.!?]+[.!?]+|[^.!?]+$/g)||[p]).flatMap(sentence=>{const words=sentence.trim().split(/\s+/);const out=[];for(let i=0;i<words.length;i+=28)out.push({type:'speech',text:words.slice(i,i+28).join(' '),status:'queued'});return out;});
+  const clauses=p.match(/[^,.!?;:]+[,.!?;:]*(?:["'](?=\s|$))?|[^,.!?;:]+$/g)||[p];
+  const chunks=[];
+  for(const clause of clauses){const words=clause.trim().split(/\s+/);for(let i=0;i<words.length;i+=28){const text=words.slice(i,i+28).join(' ').trim();if(!text)continue;if(chunks.length)chunks.push({type:'pause',ms:2000,status:'ready'});chunks.push({type:'speech',text,status:'queued'});}}
+  return chunks;
  });
 }
 let modelPromise=null;
