@@ -51,12 +51,12 @@ const effects={
 const tasks=new Map();
 let latestTask='';
 function parseScript(script){
- const pieces=String(script).split(/(\\[(?:kiss|giggle|pause:\\s*\\d{1,4}ms)\\])/gi);
+ const pieces=String(script).split(/(\[(?:kiss|giggle|pause:\s*\d{1,4}ms)\])/gi);
  return pieces.flatMap(part=>{
   const p=part.trim(); if(!p)return [];
-  if(/^\\[kiss\\]$/i.test(p))return [{type:'effect',url:effects.kiss}];
-  if(/^\\[giggle\\]$/i.test(p))return [{type:'effect',url:effects.giggle}];
-  const m=p.match(/^\\[pause:\\s*(\\d{1,4})ms\\]$/i);
+  if(/^\[kiss\]$/i.test(p))return [{type:'effect',url:effects.kiss}];
+  if(/^\[giggle\]$/i.test(p))return [{type:'effect',url:effects.giggle}];
+  const m=p.match(/^\[pause:\s*(\d{1,4})ms\]$/i);
   if(m)return [{type:'pause',ms:Math.min(3000,Number(m[1]))}];
   return [{type:'speech',text:p}];
  });
