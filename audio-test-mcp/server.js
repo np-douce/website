@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
 
-const URI = 'ui://audio-test/kokoro-hi-v2.html';
+const URI = 'ui://audio-test/kokoro-hi-v3.html';
 let status = 'idle';
 let audioData = null;
 let errorMessage = '';
@@ -38,8 +38,8 @@ function makeServer() {
       : '<h3>Kokoro: Hi</h3><p>' + (status === 'error' ? 'Generation failed: ' + htmlEscape(errorMessage) : 'Status: ' + htmlEscape(status) + '. Run the test again after the model finishes loading.') + '</p>';
     return { contents: [{ uri: URI, mimeType: RESOURCE_MIME_TYPE, text: '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="background:white;color:#111;padding:16px;font:16px system-ui">' + body + '</body></html>' }] };
   });
-  registerAppTool(server, 'test_kokoro_hi', {
-    title: 'Kokoro: say Hi',
+  registerAppTool(server, 'test_kokoro_hi_v3', {
+    title: 'Kokoro: play Hi (fresh player)',
     description: 'Generate one word using Kokoro neural TTS. Nonblocking: if the model is loading, run again later to play the cached WAV.',
     inputSchema: {},
     annotations: { readOnlyHint: true },
