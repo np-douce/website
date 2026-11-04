@@ -61,7 +61,7 @@ function parseScript(script){
   if(m)return [{type:'pause',ms:Math.min(3000,Number(m[1]))}];
   const clauses=p.match(/[^,.!?;:]+[,.!?;:]*(?:["'](?=\s|$))?|[^,.!?;:]+$/g)||[p];
   const chunks=[];
-  for(const clause of clauses){const words=clause.trim().split(/\s+/);for(let i=0;i<words.length;i+=28){const text=words.slice(i,i+28).join(' ').trim();if(!text)continue;if(chunks.length)chunks.push({type:'pause',ms:2000,status:'ready'});chunks.push({type:'speech',text,status:'queued'});}}
+  for(const clause of clauses){const words=clause.trim().split(/\s+/);for(let i=0;i<words.length;i+=28){const text=words.slice(i,i+28).join(' ').trim();if(!text)continue;if(chunks.length)chunks.push({type:'pause',ms:1000,status:'ready'});chunks.push({type:'speech',text,status:'queued'});}}
   return chunks;
  });
 }
