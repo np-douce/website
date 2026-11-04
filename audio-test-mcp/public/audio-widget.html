@@ -3,8 +3,9 @@ const player=document.getElementById('player');
 const status=document.getElementById('status');
 window.addEventListener('message',function(event){
  const msg=event.data;
+ if(msg && msg.id===1 && msg.result){window.parent.postMessage({jsonrpc:'2.0',method:'ui/notifications/initialized'},'*');}
  if(msg && msg.method==='ui/notifications/tool-result'){
-  const data=msg.params && msg.params.structuredContent;
+  const data=(msg.params && (msg.params.structuredContent || (msg.params.result && msg.params.result.structuredContent))) || {};
   if(data && typeof data.audioDataUrl==='string'){
    player.src=data.audioDataUrl;
    status.textContent='Audio ready. Tap Play.';
@@ -12,4 +13,5 @@ window.addEventListener('message',function(event){
  }
 });
 player.addEventListener('error',function(){status.textContent='Audio playback failed';});
+window.parent.postMessage({jsonrpc:'2.0',id:1,method:'ui/initialize',params:{protocolVersion:'2025-06-18',clientInfo:{name:'audio-test',version:'0.3.0'},capabilities:{}}},'*');
 </script></body></html>
