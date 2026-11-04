@@ -25,8 +25,8 @@ cat > "$PWD/../.espeak-bin/espeak-ng" <<'WRAPPER'
 BASE="$(cd "$(dirname "$0")/.." && pwd)"
 unset ESPEAK_DATA_PATH
 export LD_LIBRARY_PATH="$BASE/.espeak-root/usr/lib/x86_64-linux-gnu:$BASE/.espeak-root/usr/lib:${LD_LIBRARY_PATH:-}"
-exec "$BASE/.espeak-root/usr/bin/espeak-ng" --path="$BASE/.espeak-root/usr/share" "$@"
+exec "$BASE/.espeak-root/usr/bin/espeak-ng" --path="$BASE/.espeak-root/usr/share/espeak-ng-data" "$@"
 WRAPPER
 chmod +x "$PWD/../.espeak-bin/espeak-ng"
-"$PWD/../.espeak-bin/espeak-ng" --path="$ROOT/usr/share" --voices >/dev/null
+"$PWD/../.espeak-bin/espeak-ng" --voices >/dev/null
 test -f "$ROOT/usr/share/espeak-ng-data/phontab"
