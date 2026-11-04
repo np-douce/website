@@ -7,7 +7,7 @@ import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from '@model
 const espeakRoot=resolve('./.espeak-root/usr');
 process.env.PATH=resolve('./.espeak-bin')+':'+espeakRoot+'/bin:'+process.env.PATH;
 process.env.LD_LIBRARY_PATH=espeakRoot+'/lib/x86_64-linux-gnu:'+espeakRoot+'/lib:'+ (process.env.LD_LIBRARY_PATH||'');
-process.env.ESPEAK_DATA_PATH=espeakRoot+'/share';
+delete process.env.ESPEAK_DATA_PATH;
 const URI = 'ui://audio-test/piper-amy-autoplay-v3.html';
 let status = 'idle';
 let audioData = null;
