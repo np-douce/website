@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
 
-const URI = 'ui://audio-test/piper-amy-greeting-v2.html';
+const URI = 'ui://audio-test/piper-amy-autoplay-v3.html';
 let status = 'idle';
 let audioData = null;
 let errorMessage = '';
@@ -37,15 +37,37 @@ function startGeneration() {
 }
 function makeServer() {
   const server = new McpServer({ name: 'piper-audio-test', version: '1.0.0' });
-  registerAppResource(server, 'piper-hi-player', URI, {}, async () => {
-    const body = audioData
-      ? '<h3>Piper: Hi, how are you?</h3><audio controls preload="metadata" style="display:block;width:100%;min-height:54px" src="' + audioData + '"></audio>'
-      : '<h3>Piper: Hi, how are you?</h3><p>' + (status === 'error' ? 'Generation failed: ' + htmlEscape(errorMessage) : 'Status: ' + htmlEscape(status) + '. Run the test again after the model finishes loading.') + '</p>';
-    return { contents: [{ uri: URI, mimeType: RESOURCE_MIME_TYPE, text: '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="background:white;color:#111;padding:16px;font:16px system-ui">' + body + '</body></html>' }] };
+  registerAppResource(server, 'piper-amy-live-player', URI, {}, async () => {
+    const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="background:white;color:#111;padding:16px;font:16px system-ui">
+<h3>Piper Amy: Hi, how are you?</h3>
+<p id="status">Checking recording...</p>
+<audio id="player" controls preload="metadata" style="display:none;width:100%;min-height:54px"></audio>
+<script>
+let ready=false;
+async function poll(){
+  try{
+    const response=await fetch('/audio-test/status',{cache:'no-store'});
+    if(!response.ok)throw Error('Server unavailable');
+    const data=await response.json();
+    document.getElementById('status').textContent=data.status==='ready'?'Ready to play':data.status==='error'?'Error: '+data.error:'Status: '+data.status;
+    if(data.status==='ready'&&!ready){
+      ready=true;
+      const player=document.getElementById('player');
+      player.src='/audio-test/audio';
+      player.style.display='block';
+    }
+    if(data.status==='error')return;
+  }catch(err){document.getElementById('status').textContent='Waiting for server: '+err.message;}
+  if(!ready)setTimeout(poll,1500);
+}
+poll();
+</script></body></html>`;
+    return { contents: [{ uri: URI, mimeType: RESOURCE_MIME_TYPE, text: html }] };
   });
-  registerAppTool(server, 'test_piper_amy_greeting_v2', {
+  registerAppTool(server, 'test_piper_amy_autoplay_v3', {
     title: 'Piper: Amy female voice timed test',
-    description: "Generate Hi, how are you? using Piper neural TTS and measure loading and synthesis time. Run again after generation to play the cached WAV.",
+    description: "Generate Piper Amy voice; player automatically polls for completion without refreshing ChatGPT.",
     inputSchema: {},
     annotations: { readOnlyHint: true },
     _meta: { ui: { resourceUri: URI }, 'openai/outputTemplate': URI }
@@ -58,6 +80,16 @@ function makeServer() {
 const port = Number(process.env.PORT || 8787);
 createServer(async (req, res) => {
   const url = new URL(req.url || '/', 'http://localhost');
+  if (url.pathname === '/audio-test/status' && req.method === 'GET') {
+    res.writeHead(200, {'content-type':'application/json','cache-control':'no-store','access-control-allow-origin':'*'});
+    res.end(JSON.stringify({status,error:errorMessage}));return;
+  }
+  if (url.pathname === '/audio-test/audio' && req.method === 'GET') {
+    if (!audioData) {res.writeHead(404).end('Audio not ready');return;}
+    const audio=Buffer.from(audioData.split(',')[1],'base64');
+    res.writeHead(200,{'content-type':'audio/wav','content-length':audio.length,'cache-control':'public, max-age=3600','access-control-allow-origin':'*'});
+    res.end(audio);return;
+  }
   if (url.pathname === '/' && req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/plain' }); res.end('Piper greeting MCP: ' + status); return; }
   if (url.pathname !== '/mcp') { res.writeHead(404).end('Not found'); return; }
   res.setHeader('Access-Control-Allow-Origin', '*');
