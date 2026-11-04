@@ -3,7 +3,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
 
-const URI = 'ui://audio-test/piper-greeting-v1.html';
+const URI = 'ui://audio-test/piper-amy-greeting-v2.html';
 let status = 'idle';
 let audioData = null;
 let errorMessage = '';
@@ -14,7 +14,7 @@ async function generateHi() {
   status = 'loading'; errorMessage = '';
   try {
     const { PiperNativeTTS, resolveModelPathFromOptions } = await import('pipertts');
-    const modelPath = await resolveModelPathFromOptions({ model: 'en_US-lessac-medium', modelsDir: './models' });
+    const modelPath = await resolveModelPathFromOptions({ model: 'en_US-amy-medium', modelsDir: './models' });
     const tts = await PiperNativeTTS.load({ modelPath });
     const loaded = performance.now();
     console.log('Piper model load seconds:', ((loaded-started)/1000).toFixed(2));
@@ -43,8 +43,8 @@ function makeServer() {
       : '<h3>Piper: Hi, how are you?</h3><p>' + (status === 'error' ? 'Generation failed: ' + htmlEscape(errorMessage) : 'Status: ' + htmlEscape(status) + '. Run the test again after the model finishes loading.') + '</p>';
     return { contents: [{ uri: URI, mimeType: RESOURCE_MIME_TYPE, text: '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="background:white;color:#111;padding:16px;font:16px system-ui">' + body + '</body></html>' }] };
   });
-  registerAppTool(server, 'test_piper_greeting_v1', {
-    title: 'Piper: timed greeting',
+  registerAppTool(server, 'test_piper_amy_greeting_v2', {
+    title: 'Piper: Amy female voice timed test',
     description: "Generate Hi, how are you? using Piper neural TTS and measure loading and synthesis time. Run again after generation to play the cached WAV.",
     inputSchema: {},
     annotations: { readOnlyHint: true },
