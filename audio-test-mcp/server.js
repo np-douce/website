@@ -9,7 +9,6 @@ process.env.PATH=resolve('./.espeak-bin')+':'+espeakRoot+'/bin:'+process.env.PAT
 process.env.LD_LIBRARY_PATH=espeakRoot+'/lib/x86_64-linux-gnu:'+espeakRoot+'/lib:'+ (process.env.LD_LIBRARY_PATH||'');
 delete process.env.ESPEAK_DATA_PATH;
 const URI = 'ui://audio-test/piper-p225-autoplay-v5.html';
-let latestRequestAt = 0;
 let status = 'idle';
 let audioData = null;
 let errorMessage = '';
@@ -51,31 +50,7 @@ function makeServer() {
 <audio id="player" controls preload="metadata" style="display:none;width:100%;min-height:54px"></audio>
 <script>
 let ready=false;
-let played=false;
 const player=document.getElementById('player');
-const statusLabel=document.getElementById('status');
-const channel=typeof BroadcastChannel==='function'?new BroadcastChannel('piper-p225-audio'):null;
-const instanceId=Math.random().toString(36).slice(2);
-let latestOtherPlay=0;
-if(channel)channel.onmessage=(event)=>{
-  if(event.data?.type==='playing'&&event.data.id!==instanceId){
-    latestOtherPlay=Date.now();
-    player.pause();
-  }
-};
-async function attemptAutoplay(requestAt){
-  if(played||document.visibilityState==='hidden'||Date.now()-requestAt>25000)return;
-  played=true;
-  try{
-    await new Promise(resolve=>setTimeout(resolve,600));
-    if(document.visibilityState==='hidden'||Date.now()-requestAt>25000||Date.now()-latestOtherPlay<2000)return;
-    await player.play();
-    if(channel)channel.postMessage({type:'playing',id:instanceId});
-    statusLabel.textContent='Playing P225';
-  }catch(error){
-    statusLabel.textContent='Ready to play (autoplay blocked; tap Play)';
-  }
-}
 async function poll(){
   try{
     const response=await fetch('https://np-douce-audio-test-mcp.onrender.com/audio-test/status?v=p225-20261104',{cache:'no-store'});
@@ -86,7 +61,6 @@ async function poll(){
       ready=true;
       player.src='https://np-douce-audio-test-mcp.onrender.com/audio-test/audio?v=p225-20261104';
       player.style.display='block';
-      attemptAutoplay(data.latestRequestAt||0);
     }
     if(data.status==='error')return;
   }catch(err){document.getElementById('status').textContent='Waiting for server: '+err.message;}
@@ -98,14 +72,13 @@ poll();
   });
   registerAppTool(server, 'test_piper_p225_autoplay_v5', {
     title: 'Piper: P225 feminine British voice test',
-    description: "Generate Piper P225 voice; player attempts autoplay only for a recent request, with manual playback fallback.",
+    description: "Generate Piper P225 voice; player displays the latest P225 recording with manual playback.",
     inputSchema: {},
     annotations: { readOnlyHint: true },
     _meta: { ui: { resourceUri: URI }, 'openai/outputTemplate': URI }
   }, async () => {
-    latestRequestAt = Date.now();
     startGeneration();
-    return { content: [{ type: 'text', text: status === 'ready' ? 'Piper greeting is ready. Autoplay will be attempted for the latest request.' : 'Piper status: ' + status + (status === 'error' ? '. ' + errorMessage : '. Run again after generation completes.') }] };
+    return { content: [{ type: 'text', text: status === 'ready' ? 'Piper greeting is ready. Tap Play when ready.' : 'Piper status: ' + status + (status === 'error' ? '. ' + errorMessage : '. Run again after generation completes.') }] };
   });
   return server;
 }
@@ -114,7 +87,7 @@ createServer(async (req, res) => {
   const url = new URL(req.url || '/', 'http://localhost');
   if (url.pathname === '/audio-test/status' && req.method === 'GET') {
     res.writeHead(200, {'content-type':'application/json','cache-control':'no-store','access-control-allow-origin':'*'});
-    res.end(JSON.stringify({status,error:errorMessage,latestRequestAt}));return;
+    res.end(JSON.stringify({status,error:errorMessage}));return;
   }
   if (url.pathname === '/audio-test/audio' && req.method === 'GET') {
     if (!audioData) {res.writeHead(404).end('Audio not ready');return;}
