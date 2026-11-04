@@ -45,7 +45,7 @@ function makeServer() {
   });
   registerAppTool(server, 'test_kokoro_greeting_v4', {
     title: 'Kokoro: timed greeting',
-    description: 'Generate 'Hi, how are you?' using Kokoro neural TTS and log exact model-loading and speech-generation durations. Nonblocking: if the model is loading, run again later to play the cached WAV.',
+    description: "Generate Hi, how are you? using Kokoro neural TTS and measure loading and synthesis time. Run again after generation to play the cached WAV.",
     inputSchema: {},
     annotations: { readOnlyHint: true },
     _meta: { ui: { resourceUri: URI }, 'openai/outputTemplate': URI }
