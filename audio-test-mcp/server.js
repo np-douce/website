@@ -1,88 +1,65 @@
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { registerAppResource, registerAppTool, RESOURCE_MIME_TYPE } from '@modelcontextprotocol/ext-apps/server';
-import { z } from 'zod';
-const require=createRequire(import.meta.url);
-const meSpeak=require('mespeak');
-meSpeak.loadConfig(require('mespeak/src/mespeak_config.json'));
-meSpeak.loadVoice(require('mespeak/voices/en/en-us.json'));
-const html=readFileSync(new URL('./dist/audio-widget.html',import.meta.url),'utf8');
-const URI='ui://audio-test/diagnostic-v05.html';
-function generate(text){
- const wav=meSpeak.speak(text,{rawdata:'buffer',speed:165,pitch:55});
- if(!wav||!wav.length)throw new Error('No WAV generated');
- return 'data:audio/wav;base64,'+wav.toString('base64');
+
+const URI = 'ui://audio-test/kokoro-hi-v2.html';
+let status = 'idle';
+let audioData = null;
+let errorMessage = '';
+let job = null;
+function htmlEscape(value) { return String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
+async function generateHi() {
+  status = 'loading'; errorMessage = '';
+  try {
+    const { KokoroTTS } = await import('kokoro-js');
+    const tts = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', { dtype: 'q8', device: 'cpu' });
+    status = 'generating';
+    const audio = await tts.generate('Hi.', { voice: 'af_heart', speed: 1 });
+    const wav = await audio.toWav();
+    audioData = 'data:audio/wav;base64,' + Buffer.from(wav).toString('base64');
+    status = 'ready';
+    console.log('Kokoro Hi ready');
+  } catch (error) {
+    errorMessage = error?.message || String(error);
+    status = 'error';
+    console.error('Kokoro Hi failed:', error);
+  } finally { job = null; }
 }
-function makeServer(){
- const server=new McpServer({name:'audio-test-mcp',version:'0.2.0'});
- registerAppResource(server,'audio-player',URI,{},async()=>({contents:[{uri:URI,mimeType:RESOURCE_MIME_TYPE,text:html}]}));
- registerAppResource(server,'ui-health-check','ui://audio-test/static-check-v1.html',{},async()=>({contents:[{uri:'ui://audio-test/static-check-v1.html',mimeType:RESOURCE_MIME_TYPE,text:'<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="background:#fff;color:#111;padding:16px;font:18px system-ui"><h2>UI resource loaded</h2><p>Static HTML works. No JavaScript or audio required.</p></body></html>'}]}));
- registerAppTool(server,'check_widget',{title:'Check MCP UI resource',description:'Render a minimal static HTML diagnostic to verify MCP resource registration and iframe rendering.',inputSchema:{},annotations:{readOnlyHint:true},_meta:{ui:{resourceUri:'ui://audio-test/static-check-v1.html'},'openai/outputTemplate':'ui://audio-test/static-check-v1.html'}},async()=>({content:[{type:'text',text:'Static UI diagnostic requested.'}]}));
- registerAppResource(server,'ui-control-check','ui://audio-test/control-check-v1.html',{},async()=>({contents:[{uri:'ui://audio-test/control-check-v1.html',mimeType:RESOURCE_MIME_TYPE,text:'<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="background:white;color:black;padding:16px;font:16px system-ui"><h3>Audio Control Test</h3><audio controls preload="none" style="display:block;width:100%;min-height:54px"></audio><p>Native audio controls only. No JavaScript or audio file.</p></body></html>'}]}));
- registerAppTool(server,'check_audio_control',{title:'Check native audio control',description:'Display a native HTML audio control without JavaScript or an audio source to test Android widget rendering.',inputSchema:{},annotations:{readOnlyHint:true},_meta:{ui:{resourceUri:'ui://audio-test/control-check-v1.html'},'openai/outputTemplate':'ui://audio-test/control-check-v1.html'}},async()=>({content:[{type:'text',text:'Native audio control rendering test requested.'}]}));
- registerAppResource(server,'ui-playback-check','ui://audio-test/playback-check-v1.html',{},async()=>({contents:[{uri:'ui://audio-test/playback-check-v1.html',mimeType:RESOURCE_MIME_TYPE,text:"<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body style=\"background:white;color:black;padding:16px;font:16px system-ui\"><h3>Audio Playback Test</h3><audio controls preload=\"metadata\" style=\"display:block;width:100%;min-height:54px\" src=\"data:audio/wav;base64,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\"></audio><p>Tap Play. You should hear a short beep (0.3 seconds). No JavaScript or network audio request.</p></body></html>"}]}));
- registerAppTool(server,'check_audio_playback',{title:'Check actual audio playback',description:'Render a native audio control with a tiny embedded WAV beep to verify Android playback without JavaScript.',inputSchema:{},annotations:{readOnlyHint:true},_meta:{ui:{resourceUri:'ui://audio-test/playback-check-v1.html'},'openai/outputTemplate':'ui://audio-test/playback-check-v1.html'}},async()=>({content:[{type:'text',text:'Embedded beep audio playback test requested.'}]}));
- const speechTestUri='ui://audio-test/speech-check-v1.html';
- registerAppResource(server,'ui-speech-check',speechTestUri,{},async()=>({contents:[{uri:speechTestUri,mimeType:RESOURCE_MIME_TYPE,text:'<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="background:#fff;color:#111;padding:16px;font:16px system-ui"><h3>Generated Speech Test</h3><audio controls preload="metadata" style="display:block;width:100%;min-height:54px" src="'+generate('Hello. This is generated speech.')+'"></audio><p>Tap Play to hear speech synthesized by our free server engine. No JavaScript.</p></body></html>'}]}));
- registerAppTool(server,'check_generated_speech',{title:'Play server-generated speech',description:'Test a simple native HTML audio player with actual WAV speech generated by the free meSpeak engine.',inputSchema:{},annotations:{readOnlyHint:true},_meta:{ui:{resourceUri:speechTestUri},'openai/outputTemplate':speechTestUri}},async()=>({content:[{type:'text',text:'Generated speech playback test requested.'}]}));
- const voice95Uri='ui://audio-test/voice-p95-s145-v1.html';
- registerAppResource(server,'ui-voice-p95-s145',voice95Uri,{},async()=>({contents:[{uri:voice95Uri,mimeType:RESOURCE_MIME_TYPE,text:'<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="background:#fff;color:#111;padding:16px;font:16px system-ui"><h3>Voice Test: Pitch 95, Speed 145</h3><audio controls preload="metadata" style="display:block;width:100%;min-height:54px" src="data:audio/wav;base64,'+meSpeak.speak('Hello. This is the new voice test at pitch ninety five and speed one forty five.',{rawdata:'buffer',pitch:95,speed:145}).toString('base64')+'"></audio><p>Generated by meSpeak on Render. Tap Play to compare this higher voice.</p></body></html>'}]}));
- registerAppTool(server,'test_voice_p95_s145',{title:'Test meSpeak pitch 95 speed 145',description:'Play free generated speech at pitch 95 and speed 145 in the proven native HTML audio player.',inputSchema:{},annotations:{readOnlyHint:true},_meta:{ui:{resourceUri:voice95Uri},'openai/outputTemplate':voice95Uri}},async()=>({content:[{type:'text',text:'Generated voice test: pitch 95, speed 145.'}]}));
- const kokoroStaticUri='ui://audio-test/kokoro-static-v1.html';
- registerAppResource(server,'ui-kokoro-static',kokoroStaticUri,{},async()=>({contents:[{uri:kokoroStaticUri,mimeType:RESOURCE_MIME_TYPE,text:'<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="background:white;color:#111;padding:16px;font:16px system-ui"><h3>Kokoro Step 1: Static Player</h3><audio controls preload="none" style="display:block;width:100%;min-height:54px"></audio><p>Static player only. No neural model is loaded, and no audio is generated.</p></body></html>'}]}));
- registerAppTool(server,'kokoro_step1_static',{title:'Kokoro step 1: static player',description:'Show a Kokoro-labeled HTML audio control without loading Kokoro or generating speech, to isolate widget rendering.',inputSchema:{},annotations:{readOnlyHint:true},_meta:{ui:{resourceUri:kokoroStaticUri},'openai/outputTemplate':kokoroStaticUri}},async()=>({content:[{type:'text',text:'Kokoro step 1 static HTML player requested. No synthesis performed.'}]}));
- const kokoroPlaybackUri='ui://audio-test/kokoro-playback-v1.html';
- registerAppResource(server,'ui-kokoro-playback',kokoroPlaybackUri,{},async()=>({contents:[{uri:kokoroPlaybackUri,mimeType:RESOURCE_MIME_TYPE,text:'<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="background:white;color:#111;padding:16px;font:16px system-ui"><h3>Kokoro Step 2: Proven WAV Player</h3><audio controls preload="metadata" style="display:block;width:100%;min-height:54px" src="'+generate('Hello. The Kokoro player is working.')+'"></audio><p>This uses meSpeak WAV to validate the player, not the Kokoro neural model.</p></body></html>'}]}));
- registerAppTool(server,'kokoro_step2_playback',{title:'Kokoro step 2: proven WAV player',description:'Play a tiny meSpeak-generated WAV in the Kokoro-labeled native player. No Kokoro model loading.',inputSchema:{},annotations:{readOnlyHint:true},_meta:{ui:{resourceUri:kokoroPlaybackUri},'openai/outputTemplate':kokoroPlaybackUri}},async()=>({content:[{type:'text',text:'Kokoro step 2 proven WAV player requested; audio synthesized with meSpeak only.'}]}));
- const longerUri='ui://audio-test/longer-speech-v1.html';
- registerAppResource(server,'ui-longer-speech',longerUri,{},async()=>({contents:[{uri:longerUri,mimeType:RESOURCE_MIME_TYPE,text:'<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="background:white;color:#111;padding:16px;font:16px system-ui"><h3>Longer Speech Test</h3><audio controls preload="metadata" style="display:block;width:100%;min-height:54px" src="'+generate("Yes, it's working now. I can hear it. Do a little bit longer, maybe everything I just said now.")+'"></audio><p>Exact words from the latest request, generated with meSpeak.</p></body></html>'}]}));
- registerAppTool(server,'test_longer_speech',{title:'Test longer spoken phrase',description:'Play the user's longer sentence using the confirmed meSpeak WAV player.',inputSchema:{},annotations:{readOnlyHint:true},_meta:{ui:{resourceUri:longerUri},'openai/outputTemplate':longerUri}},async()=>({content:[{type:'text',text:'Longer meSpeak recording requested.'}]}));
- const kokoroUri='ui://audio-test/kokoro-q8-heart-v1.html';
- let kokoroPromise;
- async function getKokoro(){
-  if(!kokoroPromise)kokoroPromise=import('kokoro-js').then(({KokoroTTS})=>KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX',{dtype:'q8',device:'cpu'})).catch(e=>{kokoroPromise=undefined;throw e;});
-  return kokoroPromise;
- }
- function safeHtml(s){return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');}
- registerAppResource(server,'ui-kokoro-q8-heart',kokoroUri,{},async()=>{
-  let body;
-  try{
-   const tts=await getKokoro();
-   const audio=await tts.generate('Hi.',{voice:'af_heart',speed:1});
-   const wav=await audio.toWav();
-   const bytes=Buffer.isBuffer(wav)?wav:Buffer.from(wav);
-   body='<h3>Kokoro 82M - Heart Voice</h3><audio controls preload="metadata" style="display:block;width:100%;min-height:54px" src="data:audio/wav;base64,'+bytes.toString('base64')+'"></audio><p>Free neural voice generated on Render. Tap Play.</p>';
-  }catch(e){console.error('Kokoro test failed:',e);body='<h3>Kokoro test could not generate audio</h3><p>'+safeHtml(e.message||e)+'</p><p>All meSpeak tests are still available.</p>';}
-  return {contents:[{uri:kokoroUri,mimeType:RESOURCE_MIME_TYPE,text:'<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="background:white;color:#111;padding:16px;font:16px system-ui">'+body+'</body></html>'}]};
- });
- registerAppTool(server,'test_kokoro_voice',{title:'Test Kokoro neural voice',description:'Test a free Kokoro-82M q8 neural American English voice in the existing Android-compatible native audio player. First load may be slow.',inputSchema:{},annotations:{readOnlyHint:true},_meta:{ui:{resourceUri:kokoroUri},'openai/outputTemplate':kokoroUri}},async()=>({content:[{type:'text',text:'Kokoro voice test requested. Open the audio widget; initial model download may take time.'}]}));
- registerAppTool(server,'speak_text',{
-  title:'Audio Test: Play generated audio',
-  description:'Generate free WAV speech on the server and show an inline Play/Stop HTML audio player. No browser speechSynthesis or paid API.',
-  inputSchema:{text:z.string().min(1).max(250)},
-  annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},
-  _meta:{ui:{resourceUri:URI},'openai/outputTemplate':URI}
- },async({text})=>{
-  try{
-   const audioDataUrl=generate(text);
-   return {content:[{type:'text',text:'WAV audio generated. Tap Play in the widget.'}],structuredContent:{text,audioDataUrl}};
-  }catch(e){return {isError:true,content:[{type:'text',text:'Audio generation failed: '+e.message}]};}
- });
- return server;
+function startGeneration() {
+  if (status === 'ready' || job) return;
+  job = generateHi();
 }
-const port=Number(process.env.PORT||8787);
-createServer(async(req,res)=>{
- const url=new URL(req.url||'/', 'http://localhost');
- if(url.pathname==='/'&&req.method==='GET'){res.writeHead(200,{'content-type':'text/plain'});res.end('Audio Test MCP v0.2: server-generated WAV at /mcp');return;}
- if(url.pathname!=='/mcp'){res.writeHead(404).end('Not found');return;}
- res.setHeader('Access-Control-Allow-Origin','*');
- res.setHeader('Access-Control-Expose-Headers','Mcp-Session-Id');
- if(req.method==='OPTIONS'){res.writeHead(204,{'Access-Control-Allow-Methods':'POST, GET, DELETE, OPTIONS','Access-Control-Allow-Headers':'content-type, mcp-session-id, mcp-protocol-version, accept'}).end();return;}
- const server=makeServer();
- const transport=new StreamableHTTPServerTransport({sessionIdGenerator:undefined,enableJsonResponse:true});
- try{await server.connect(transport);await transport.handleRequest(req,res);}
- catch(e){console.error(e);if(!res.headersSent)res.writeHead(500).end('MCP error');}
-}).listen(port,'0.0.0.0',()=>console.log('Audio Test v0.2 listening on '+port));
+function makeServer() {
+  const server = new McpServer({ name: 'kokoro-audio-test', version: '1.0.0' });
+  registerAppResource(server, 'kokoro-hi-player', URI, {}, async () => {
+    const body = audioData
+      ? '<h3>Kokoro: Hi</h3><audio controls preload="metadata" style="display:block;width:100%;min-height:54px" src="' + audioData + '"></audio>'
+      : '<h3>Kokoro: Hi</h3><p>' + (status === 'error' ? 'Generation failed: ' + htmlEscape(errorMessage) : 'Status: ' + htmlEscape(status) + '. Run the test again after the model finishes loading.') + '</p>';
+    return { contents: [{ uri: URI, mimeType: RESOURCE_MIME_TYPE, text: '<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="background:white;color:#111;padding:16px;font:16px system-ui">' + body + '</body></html>' }] };
+  });
+  registerAppTool(server, 'test_kokoro_hi', {
+    title: 'Kokoro: say Hi',
+    description: 'Generate one word using Kokoro neural TTS. Nonblocking: if the model is loading, run again later to play the cached WAV.',
+    inputSchema: {},
+    annotations: { readOnlyHint: true },
+    _meta: { ui: { resourceUri: URI }, 'openai/outputTemplate': URI }
+  }, async () => {
+    startGeneration();
+    return { content: [{ type: 'text', text: status === 'ready' ? 'Kokoro Hi is ready. Tap Play.' : 'Kokoro status: ' + status + (status === 'error' ? '. ' + errorMessage : '. Run again after generation completes.') }] };
+  });
+  return server;
+}
+const port = Number(process.env.PORT || 8787);
+createServer(async (req, res) => {
+  const url = new URL(req.url || '/', 'http://localhost');
+  if (url.pathname === '/' && req.method === 'GET') { res.writeHead(200, { 'content-type': 'text/plain' }); res.end('Kokoro Hi MCP: ' + status); return; }
+  if (url.pathname !== '/mcp') { res.writeHead(404).end('Not found'); return; }
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Expose-Headers', 'Mcp-Session-Id');
+  if (req.method === 'OPTIONS') { res.writeHead(204, { 'Access-Control-Allow-Methods': 'POST, GET, DELETE, OPTIONS', 'Access-Control-Allow-Headers': 'content-type, mcp-session-id, mcp-protocol-version, accept' }).end(); return; }
+  const server = makeServer();
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+  try { await server.connect(transport); await transport.handleRequest(req, res); }
+  catch (error) { console.error(error); if (!res.headersSent) res.writeHead(500).end('MCP error'); }
+}).listen(port, '0.0.0.0', () => console.log('Kokoro Hi listening on ' + port));
