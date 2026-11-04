@@ -19,12 +19,12 @@ async function generateHi() {
   status = 'loading'; errorMessage = '';
   try {
     const { PiperNativeTTS, resolveModelPathFromOptions } = await import('pipertts');
-    const modelPath = await resolveModelPathFromOptions({ model: 'en_US-amy-medium', modelsDir: './models' });
+    const modelPath = await resolveModelPathFromOptions({ model: 'en_GB-vctk-medium', modelsDir: './models' });
     const tts = await PiperNativeTTS.load({ modelPath });
     const loaded = performance.now();
     console.log('Piper model load seconds:', ((loaded-started)/1000).toFixed(2));
     status = 'generating';
-    const { audio } = await tts.synthesize('Hello again. This is Amy, and the new voice test is working.');
+    const { audio } = await tts.synthesize('You know, I was going to agree with you. Then I checked the mathematics.', { speakerId: 107 });
     audioData = 'data:audio/wav;base64,' + Buffer.from(audio).toString('base64');
     status = 'ready';
     console.log('Piper speech generation seconds:', ((performance.now()-loaded)/1000).toFixed(2));
@@ -45,7 +45,7 @@ function makeServer() {
   registerAppResource(server, 'piper-amy-live-player', URI, {}, async () => {
     const html = `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head>
 <body style="background:white;color:#111;padding:16px;font:16px system-ui">
-<h3>Piper Amy: Hello again. This is Amy, and the new voice test is working.</h3>
+<h3>Piper P225: You know, I was going to agree with you. Then I checked the mathematics.</h3>
 <p id="status">Checking recording...</p>
 <audio id="player" controls preload="metadata" style="display:none;width:100%;min-height:54px"></audio>
 <script>
@@ -71,8 +71,8 @@ poll();
     return { contents: [{ uri: URI, mimeType: RESOURCE_MIME_TYPE, text: html }] };
   });
   registerAppTool(server, 'test_piper_amy_autoplay_v3', {
-    title: 'Piper: Amy female voice timed test',
-    description: "Generate Piper Amy voice; player automatically polls for completion without refreshing ChatGPT.",
+    title: 'Piper: P225 feminine British voice test',
+    description: "Generate Piper P225 voice; player automatically polls for completion without refreshing ChatGPT.",
     inputSchema: {},
     annotations: { readOnlyHint: true },
     _meta: { ui: { resourceUri: URI }, 'openai/outputTemplate': URI }
