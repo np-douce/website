@@ -204,6 +204,7 @@ html,body{margin:0;padding:0;background:transparent}
 </section>
 <script>
 const base='${BASE}',audio=document.getElementById('player'),statusEl=document.getElementById('status');
+const replay=document.getElementById('replay');
 let task=null,index=0,pauseTimer=null,lockedId=null;
 function acceptTask(payload){
  const o=payload?.structuredContent??payload?.result?.structuredContent??payload?.toolOutput?.structuredContent??payload?.toolOutput??payload;
@@ -222,7 +223,6 @@ window.addEventListener('message',e=>{
  if(e.source!==window.parent||e.data?.jsonrpc!=='2.0')return;
  if(e.data.method==='ui/notifications/tool-result'||e.data.method==='ui/notifications/tool-input')acceptTask(e.data.params);
 });
-const replay=document.getElementById('replay');
 function setFirstSegment(){
  if(!task)return;
  index=0;
