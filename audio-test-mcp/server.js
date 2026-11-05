@@ -205,6 +205,23 @@ html,body{margin:0;padding:0;background:transparent}
 <script>
 const base='${BASE}',audio=document.getElementById('player'),statusEl=document.getElementById('status');
 let task=null,index=0,pauseTimer=null,lockedId=null;
+function acceptTask(payload){
+ const o=payload?.structuredContent??payload?.result?.structuredContent??payload?.toolOutput?.structuredContent??payload?.toolOutput??payload;
+ const id=o?.taskId??o?.task_id;
+ if(typeof id==='string'&&/^[a-f0-9-]{36}$/i.test(id)&&id!==lockedId){
+  lockedId=id;task=null;index=0;
+  if(pauseTimer!==null){clearTimeout(pauseTimer);pauseTimer=null;}
+  audio.pause();audio.removeAttribute('src');audio.load();
+  audio.style.display='none';replay.style.display='none';
+  statusEl.textContent='Preparing this reply audio';
+  poll();
+ }
+}
+acceptTask(window.openai?.toolOutput);
+window.addEventListener('message',e=>{
+ if(e.source!==window.parent||e.data?.jsonrpc!=='2.0')return;
+ if(e.data.method==='ui/notifications/tool-result'||e.data.method==='ui/notifications/tool-input')acceptTask(e.data.params);
+});
 const replay=document.getElementById('replay');
 function setFirstSegment(){
  if(!task)return;
@@ -234,9 +251,9 @@ async function next(){
 audio.addEventListener('ended',next);
 async function poll(){
  try{
-  const r=await fetch(base+'/audio-test/v7/status'+(lockedId?'?id='+lockedId:''),{cache:'no-store'});
+  const r=await fetch(base+'/audio-test/v7/status?id='+encodeURIComponent(lockedId),{cache:'no-store'});
   const d=await r.json();
-  if(d.id&&!lockedId)lockedId=d.id;
+  if(!lockedId){statusEl.textContent='Waiting for recording ID';setTimeout(poll,1000);return;}
   if(d.status==='missing'){statusEl.textContent='Render restarted; request a new recording';return;}
   if(d.segments?.[0]?.status==='ready'||(d.segments?.[0]?.type!=='speech'&&d.segments?.length)){task=d;statusEl.textContent='Ready to play';setFirstSegment();audio.style.display='block';replay.style.display='inline-block';statusEl.textContent='Attempting automatic playback';try{await audio.play();statusEl.textContent='Playing';}catch(e){statusEl.textContent='Autoplay blocked by browser. Tap Play to begin.';}return;}
   statusEl.textContent=d.status==='error'?'Error: '+d.error:'Status: '+d.status;
@@ -254,7 +271,7 @@ poll();
    _meta:{ui:{resourceUri:URI7},'openai/outputTemplate':URI7}
   },async({script})=>{
    const task=startTask(script);
-   return {content:[{type:'text',text:'Queued audio script '+task.id+'. The embedded player will load it.'}]};
+   return {content:[{type:'text',text:'Queued audio script '+task.id+'. The embedded player will load it.'}],structuredContent:{taskId:task.id,status:'queued'}};
   });
   return server;
 }
